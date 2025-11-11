@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/NavBar';
 import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
-import {NewOrder} from './pages/NewOrder';
-import {MyOrders} from './pages/MyOrders';
-import {StoresList} from './pages/StoresList';
+import { NewOrder } from './pages/NewOrder';
+import { MyOrders } from './pages/MyOrders';
+import { StoresList } from './pages/StoresList';
+import { OrderHistory } from './pages/OrderHistory';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // Protected Route Component
@@ -44,6 +45,14 @@ function AppContent() {
             element={
               <ProtectedRoute>
                 <MyOrders />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/orders/:orderId/history"
+            element={
+              <ProtectedRoute>
+                <OrderHistory />
               </ProtectedRoute>
             }
           />

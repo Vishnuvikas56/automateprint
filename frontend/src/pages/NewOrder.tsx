@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { FileText, Upload, Loader, CheckCircle } from 'lucide-react';
+import { FileText, Loader, CheckCircle, XCircle } from 'lucide-react';
+import PaymentModal from '../components/PaymentModal';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -21,13 +22,18 @@ export const NewOrder: React.FC = () => {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
+  // Payment states
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentDetails, setPaymentDetails] = useState<any>(null);
+  const [paymentError, setPaymentError] = useState('');
+  const [showPaymentErrorModal, setShowPaymentErrorModal] = useState(false);
+
   const [formData, setFormData] = useState({
     store_id: 'STORE001',
     pages: 1,
     copies: 1,
     color_mode: 'bw',
     priority: 2,
-    document_name: ''
   });
 
   const [estimatedPrice, setEstimatedPrice] = useState(0);
@@ -50,12 +56,13 @@ export const NewOrder: React.FC = () => {
   };
 
   const calculatePrice = () => {
-    const store = stores.find(s => s.store_id === formData.store_id);
+    const store = stores.find((s) => s.store_id === formData.store_id);
     if (!store) return;
 
-    const pricePerPage = formData.color_mode === 'color' 
-      ? store.pricing_info.color_per_page 
-      : store.pricing_info.bw_per_page;
+    const pricePerPage =
+      formData.color_mode === 'color'
+        ? store.pricing_info.color_per_page
+        : store.pricing_info.bw_per_page;
 
     const total = formData.pages * formData.copies * pricePerPage;
     setEstimatedPrice(total);
@@ -67,25 +74,59 @@ export const NewOrder: React.FC = () => {
     setError('');
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/orders/submit`, formData);
-      setSuccess(true);
+      // Step 1: Create order and payment
+      const response = await axios.post(`${API_BASE_URL}/orders/create-payment`, formData);
       
-      setTimeout(() => {
-        navigate('/my-orders');
-      }, 2000);
+      setPaymentDetails(response.data);
+      setShowPaymentModal(true);
+      
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to submit order');
+      setError(err.response?.data?.detail || 'Failed to create order');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePaymentSuccess = async (paymentData: any) => {
+    setShowPaymentModal(false);
+    setLoading(true);
+
+    try {
+      // Step 2: Verify payment
+      const response = await axios.post(`${API_BASE_URL}/orders/verify-payment`, {
+        razorpay_order_id: paymentData.razorpay_order_id,
+        razorpay_payment_id: paymentData.razorpay_payment_id,
+        razorpay_signature: paymentData.razorpay_signature,
+      });
+
+      if (response.data.success) {
+        setSuccess(true);
+        setTimeout(() => {
+          navigate('/my-orders');
+        }, 2000);
+      }
+    } catch (err: any) {
+      setPaymentError(err.response?.data?.detail || 'Payment verification failed');
+      setShowPaymentErrorModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePaymentFailure = (error: any) => {
+    setShowPaymentModal(false);
+    setPaymentError(error.error || 'Payment failed');
+    setShowPaymentErrorModal(true);
   };
 
   if (success) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-20 text-center">
         <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-4" />
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">Order Submitted Successfully!</h2>
-        <p className="text-gray-600">Redirecting to your orders...</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">
+          Order Placed Successfully!
+        </h2>
+        <p className="text-gray-600">Your print job is being processed...</p>
       </div>
     );
   }
@@ -98,9 +139,7 @@ export const NewOrder: React.FC = () => {
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-lg">
-          {error}
-        </div>
+        <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-lg">{error}</div>
       )}
 
       <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6">
@@ -125,25 +164,14 @@ export const NewOrder: React.FC = () => {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Document Name (Optional)
-            </label>
-            <input
-              type="text"
-              value={formData.document_name}
-              onChange={(e) => setFormData({ ...formData, document_name: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="My Document"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
               Number of Pages
             </label>
             <input
               type="number"
               value={formData.pages}
-              onChange={(e) => setFormData({ ...formData, pages: parseInt(e.target.value) })}
+              onChange={(e) =>
+                setFormData({ ...formData, pages: parseInt(e.target.value) })
+              }
               min="1"
               max="1000"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -158,7 +186,9 @@ export const NewOrder: React.FC = () => {
             <input
               type="number"
               value={formData.copies}
-              onChange={(e) => setFormData({ ...formData, copies: parseInt(e.target.value) })}
+              onChange={(e) =>
+                setFormData({ ...formData, copies: parseInt(e.target.value) })
+              }
               min="1"
               max="100"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -187,7 +217,9 @@ export const NewOrder: React.FC = () => {
             </label>
             <select
               value={formData.priority}
-              onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) })}
+              onChange={(e) =>
+                setFormData({ ...formData, priority: parseInt(e.target.value) })
+              }
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
             >
@@ -200,8 +232,10 @@ export const NewOrder: React.FC = () => {
 
         <div className="mt-6 p-4 bg-blue-50 rounded-lg">
           <div className="flex justify-between items-center">
-            <span className="text-lg font-semibold text-gray-700">Estimated Price:</span>
-            <span className="text-2xl font-bold text-blue-600">₹{estimatedPrice.toFixed(2)}</span>
+            <span className="text-lg font-semibold text-gray-700">Total Amount:</span>
+            <span className="text-2xl font-bold text-blue-600">
+              ₹{estimatedPrice.toFixed(2)}
+            </span>
           </div>
           <p className="text-sm text-gray-600 mt-2">
             {formData.pages} pages × {formData.copies} copies × ₹
@@ -218,16 +252,16 @@ export const NewOrder: React.FC = () => {
             {loading ? (
               <>
                 <Loader className="animate-spin h-5 w-5 mr-2" />
-                Submitting...
+                Processing...
               </>
             ) : (
               <>
                 <FileText className="h-5 w-5 mr-2" />
-                Submit Order
+                Proceed to Payment
               </>
             )}
           </button>
-          
+
           <button
             type="button"
             onClick={() => navigate('/dashboard')}
@@ -237,6 +271,39 @@ export const NewOrder: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {/* Payment Modal */}
+      <PaymentModal
+        isOpen={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        orderDetails={paymentDetails}
+        onPaymentSuccess={handlePaymentSuccess}
+        onPaymentFailure={handlePaymentFailure}
+      />
+
+      {/* Payment Error Modal */}
+      {showPaymentErrorModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+            <div className="text-center">
+              <XCircle className="h-16 w-16 text-red-600 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                Payment Failed
+              </h2>
+              <p className="text-gray-600 mb-6">{paymentError}</p>
+              <button
+                onClick={() => {
+                  setShowPaymentErrorModal(false);
+                  setPaymentError('');
+                }}
+                className="w-full py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

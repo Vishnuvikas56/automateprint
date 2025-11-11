@@ -178,6 +178,9 @@ class Order(Base):
     price = Column(Float, nullable=False)
     payment_status = Column(SQLEnum(PaymentStatusEnum), default=PaymentStatusEnum.UNPAID)
     assigned_supervisor_id = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=True)
+    razorpay_order_id = Column(String(100), unique=True)
+    razorpay_payment_id = Column(String(100), unique=True)
+    razorpay_signature = Column(String(255))
     
     # Scheduling fields
     estimated_start_time = Column(DateTime, nullable=True)
@@ -191,6 +194,8 @@ class Order(Base):
     printer = relationship("Printer", back_populates="orders")
     assigned_supervisor = relationship("SupervisorData", back_populates="assigned_orders")
     alerts = relationship("Alert", back_populates="order")
+    payment_transactions = relationship("PaymentTransaction", back_populates="order")
+    history = relationship("OrderHistory", back_populates="order", order_by="OrderHistory.created_at")
 
 class Alert(Base):
     __tablename__ = "alerts"
@@ -212,3 +217,34 @@ class Alert(Base):
     printer = relationship("Printer", back_populates="alerts")
     order = relationship("Order", back_populates="alerts")
     supervisor = relationship("SupervisorData", back_populates="alerts")
+
+# Add these classes to your existing models.py file
+
+class PaymentTransaction(Base):
+    __tablename__ = "payment_transactions"
+    
+    transaction_id = Column(String(100), primary_key=True, index=True)
+    order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=False)
+    razorpay_order_id = Column(String(100), unique=True, nullable=False)
+    razorpay_payment_id = Column(String(100), unique=True)
+    razorpay_signature = Column(String(255))
+    amount = Column(Float, nullable=False)
+    currency = Column(String(10), default="INR")
+    status = Column(String(20), default="created")  # created, success, failed
+    gateway_response = Column(JSON)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Relationships
+    order = relationship("Order", back_populates="payment_transactions")
+
+
+class OrderHistory(Base):
+    __tablename__ = "order_history"
+    history_id = Column(Integer, primary_key=True, autoincrement=True)
+    order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=False, index=True)
+    status = Column(SQLEnum(OrderStatusEnum), nullable=False)
+    message = Column(Text)
+    meta = Column(JSON)  # Store any additional context
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    # Relationships
+    order = relationship("Order", back_populates="history")

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { RefreshCw, Eye, FileText } from 'lucide-react';
+import { RefreshCw, Eye, FileText, History } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -11,13 +12,14 @@ interface Order {
   copies: number;
   price: number;
   order_date: string;
-  document_name?: string;
+  payment_status: string;
   printer_id?: string;
   estimated_start_time?: string;
   estimated_end_time?: string;
 }
 
 export const MyOrders: React.FC = () => {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -52,6 +54,19 @@ export const MyOrders: React.FC = () => {
         return 'bg-blue-100 text-blue-800';
       case 'pending':
         return 'bg-yellow-100 text-yellow-800';
+      case 'failed':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getPaymentStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'paid':
+        return 'bg-green-100 text-green-800';
+      case 'unpaid':
+        return 'bg-red-100 text-red-800';
       case 'failed':
         return 'bg-red-100 text-red-800';
       default:
@@ -94,13 +109,13 @@ export const MyOrders: React.FC = () => {
                     Order ID
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Document
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Pages
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Price
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Payment
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
@@ -120,28 +135,46 @@ export const MyOrders: React.FC = () => {
                       {order.order_id}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {order.document_name || 'Untitled'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {order.pages_count} × {order.copies}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       ₹{order.price.toFixed(2)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
+                      <span
+                        className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getPaymentStatusColor(
+                          order.payment_status
+                        )}`}
+                      >
+                        {order.payment_status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(
+                          order.status
+                        )}`}
+                      >
                         {order.status}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {new Date(order.order_date).toLocaleString()}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                       <button
                         onClick={() => setSelectedOrder(order)}
                         className="text-blue-600 hover:text-blue-900"
+                        title="View Details"
                       >
                         <Eye className="h-5 w-5" />
+                      </button>
+                      <button
+                        onClick={() => navigate(`/orders/${order.order_id}/history`)}
+                        className="text-green-600 hover:text-green-900"
+                        title="View History"
+                      >
+                        <History className="h-5 w-5" />
                       </button>
                     </td>
                   </tr>
@@ -171,13 +204,29 @@ export const MyOrders: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Status</p>
-                  <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(selectedOrder.status)}`}>
+                  <span
+                    className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(
+                      selectedOrder.status
+                    )}`}
+                  >
                     {selectedOrder.status}
                   </span>
                 </div>
                 <div>
+                  <p className="text-sm text-gray-600">Payment Status</p>
+                  <span
+                    className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getPaymentStatusColor(
+                      selectedOrder.payment_status
+                    )}`}
+                  >
+                    {selectedOrder.payment_status}
+                  </span>
+                </div>
+                <div>
                   <p className="text-sm text-gray-600">Pages</p>
-                  <p className="font-semibold">{selectedOrder.pages_count} × {selectedOrder.copies}</p>
+                  <p className="font-semibold">
+                    {selectedOrder.pages_count} × {selectedOrder.copies}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Price</p>
@@ -189,16 +238,27 @@ export const MyOrders: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Order Date</p>
-                  <p className="font-semibold">{new Date(selectedOrder.order_date).toLocaleString()}</p>
+                  <p className="font-semibold">
+                    {new Date(selectedOrder.order_date).toLocaleString()}
+                  </p>
                 </div>
               </div>
             </div>
-            <button
-              onClick={() => setSelectedOrder(null)}
-              className="mt-6 w-full py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
-            >
-              Close
-            </button>
+            <div className="mt-6 flex space-x-4">
+              <button
+                onClick={() => navigate(`/orders/${selectedOrder.order_id}/history`)}
+                className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2"
+              >
+                <History className="h-5 w-5" />
+                <span>View Full History</span>
+              </button>
+              <button
+                onClick={() => setSelectedOrder(null)}
+                className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

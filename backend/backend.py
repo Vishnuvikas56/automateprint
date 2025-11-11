@@ -3,7 +3,7 @@ Job Management FastAPI Server with PostgreSQL and Authentication
 Run: uvicorn backend:app --port 8000 --reload
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status, Header
+from fastapi import FastAPI, HTTPException, Depends, status, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
@@ -32,6 +32,13 @@ from smart_scheduler import (
     ColorMode as SchedulerColorMode, PrinterStatus as SchedulerPrinterStatus
 )
 
+from models import PaymentTransaction, OrderHistory
+from payment import create_razorpay_order, verify_payment_signature, get_payment_details
+import uuid as uuid_lib
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=".env")
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 # ==================== Logging Setup ====================
 
 logger = logging.getLogger("backend")
@@ -165,6 +172,11 @@ class PrinterCreate(BaseModel):
     printer_model: Optional[str]
     color_support: bool
     duplex_support: bool = False
+
+class RazorpayVerifyRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
 
 # ==================== Global Scheduler ====================
 
@@ -396,100 +408,100 @@ def get_store(store_id: str, db: Session = Depends(get_db)):
 
 # ==================== Order Management ====================
 
-@app.post("/orders/submit", response_model=JobResponse)
-async def submit_order(
-    request: SubmitJobRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Submit new print order"""
+# @app.post("/orders/submit", response_model=JobResponse)
+# async def submit_order(
+#     request: SubmitJobRequest,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Submit new print order"""
     
-    logger.info(f"Order from user {current_user.username}: {request.pages}p × {request.copies}, {request.color_mode}")
+#     logger.info(f"Order from user {current_user.username}: {request.pages}p × {request.copies}, {request.color_mode}")
     
-    if scheduler is None:
-        raise HTTPException(status_code=503, detail="Scheduler not initialized")
+#     if scheduler is None:
+#         raise HTTPException(status_code=503, detail="Scheduler not initialized")
     
-    order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
-    price = calculate_price(request.pages, request.copies, request.color_mode, request.store_id, db)
+#     order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+#     price = calculate_price(request.pages, request.copies, request.color_mode, request.store_id, db)
     
-    # Create scheduler job
-    scheduler_job = PrintJob(
-        job_id=order_id,
-        pages=request.pages,
-        copies=request.copies,
-        color_mode=SchedulerColorMode.COLOR if request.color_mode == "color" else SchedulerColorMode.BW,
-        priority=request.priority,
-        submitted_at=datetime.now(),
-        user_id=current_user.user_id
-    )
+#     # Create scheduler job
+#     scheduler_job = PrintJob(
+#         job_id=order_id,
+#         pages=request.pages,
+#         copies=request.copies,
+#         color_mode=SchedulerColorMode.COLOR if request.color_mode == "color" else SchedulerColorMode.BW,
+#         priority=request.priority,
+#         submitted_at=datetime.now(),
+#         user_id=current_user.user_id
+#     )
     
-    scheduled = scheduler.schedule_job(scheduler_job)
+#     scheduled = scheduler.schedule_job(scheduler_job)
     
-    if not scheduled:
-        logger.warning(f"No printer available for order {order_id}")
-        create_alert(db, request.store_id, AlertTypeEnum.OTHER, 
-                    "No suitable printer available", AlertSeverityEnum.CRITICAL)
-        raise HTTPException(status_code=503, detail="No suitable printer available")
+#     if not scheduled:
+#         logger.warning(f"No printer available for order {order_id}")
+#         create_alert(db, request.store_id, AlertTypeEnum.OTHER, 
+#                     "No suitable printer available", AlertSeverityEnum.CRITICAL)
+#         raise HTTPException(status_code=503, detail="No suitable printer available")
     
-    # Create order in database
-    order = Order(
-        order_id=order_id,
-        user_id=current_user.user_id,
-        store_id=request.store_id,
-        printer_id=scheduled.printer_id,
-        pages_count=request.pages,
-        copies=request.copies,
-        print_settings={
-            "color_mode": request.color_mode,
-            "priority": request.priority
-        },
-        price=price,
-        status=OrderStatusEnum.PROCESSING,
-        estimated_start_time=scheduled.start_time,
-        estimated_end_time=scheduled.end_time
-    )
+#     # Create order in database
+#     order = Order(
+#         order_id=order_id,
+#         user_id=current_user.user_id,
+#         store_id=request.store_id,
+#         printer_id=scheduled.printer_id,
+#         pages_count=request.pages,
+#         copies=request.copies,
+#         print_settings={
+#             "color_mode": request.color_mode,
+#             "priority": request.priority
+#         },
+#         price=price,
+#         status=OrderStatusEnum.PROCESSING,
+#         estimated_start_time=scheduled.start_time,
+#         estimated_end_time=scheduled.end_time
+#     )
     
-    db.add(order)
-    db.commit()
+#     db.add(order)
+#     db.commit()
     
-    logger.info(f"Order {order_id} scheduled to {scheduled.printer_id}, price={price}")
+#     logger.info(f"Order {order_id} scheduled to {scheduled.printer_id}, price={price}")
     
-    # Send to printer API
-    try:
-        await send_to_printer_api(
-            scheduled.printer_id,
-            order_id,
-            request.pages,
-            request.copies,
-            request.color_mode
-        )
+#     # Send to printer API
+#     try:
+#         await send_to_printer_api(
+#             scheduled.printer_id,
+#             order_id,
+#             request.pages,
+#             request.copies,
+#             request.color_mode
+#         )
         
-        order.status = OrderStatusEnum.PROCESSING
-        order.actual_start_time = datetime.now()
-        db.commit()
+#         order.status = OrderStatusEnum.PROCESSING
+#         order.actual_start_time = datetime.now()
+#         db.commit()
         
-        logger.info(f"Order {order_id} sent to printer successfully")
+#         logger.info(f"Order {order_id} sent to printer successfully")
         
-    except Exception as e:
-        order.status = OrderStatusEnum.FAILED
-        db.commit()
+#     except Exception as e:
+#         order.status = OrderStatusEnum.FAILED
+#         db.commit()
         
-        create_alert(db, request.store_id, AlertTypeEnum.OTHER,
-                    f"Failed to send order {order_id} to printer", AlertSeverityEnum.CRITICAL,
-                    printer_id=scheduled.printer_id, order_id=order_id)
+#         create_alert(db, request.store_id, AlertTypeEnum.OTHER,
+#                     f"Failed to send order {order_id} to printer", AlertSeverityEnum.CRITICAL,
+#                     printer_id=scheduled.printer_id, order_id=order_id)
         
-        raise HTTPException(status_code=500, detail=f"Failed to send to printer: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to send to printer: {e}")
     
-    return JobResponse(
-        order_id=order_id,
-        status=order.status.value,
-        assigned_printer_id=scheduled.printer_id,
-        estimated_start_time=scheduled.start_time,
-        estimated_end_time=scheduled.end_time,
-        estimated_wait_seconds=scheduled.estimated_wait_seconds,
-        price=price,
-        message="Order submitted successfully"
-    )
+#     return JobResponse(
+#         order_id=order_id,
+#         status=order.status.value,
+#         assigned_printer_id=scheduled.printer_id,
+#         estimated_start_time=scheduled.start_time,
+#         estimated_end_time=scheduled.end_time,
+#         estimated_wait_seconds=scheduled.estimated_wait_seconds,
+#         price=price,
+#         message="Order submitted successfully"
+#     )
 
 @app.get("/orders/my-orders")
 def get_my_orders(
@@ -609,6 +621,315 @@ async def reset_system(db: Session = Depends(get_db)):
     
     logger.info("System reset complete")
     return {"message": "System reset successfully"}
+
+@app.post("/orders/create-payment")
+async def create_payment_order(
+    request: SubmitJobRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Step 1: Create order and Razorpay payment order (BEFORE payment)
+    """
+    logger.info(f"Creating payment order for user {current_user.username}")
+    
+    order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+    price = calculate_price(request.pages, request.copies, request.color_mode, request.store_id, db)
+    
+    # Create order in PENDING state
+    order = Order(
+        order_id=order_id,
+        user_id=current_user.user_id,
+        store_id=request.store_id,
+        pages_count=request.pages,
+        copies=request.copies,
+        print_settings={
+            "color_mode": request.color_mode,
+            "priority": request.priority
+        },
+        price=price,
+        status=OrderStatusEnum.PENDING,
+        payment_status=PaymentStatusEnum.UNPAID
+    )
+    
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    
+    # Log to history
+    history = OrderHistory(
+        order_id=order_id,
+        status=OrderStatusEnum.PENDING,
+        message="Order created, awaiting payment"
+    )
+    db.add(history)
+    
+    try:
+        # Create Razorpay order
+        razorpay_order = create_razorpay_order(price, order_id)
+        
+        # Update order with Razorpay order ID
+        order.razorpay_order_id = razorpay_order["razorpay_order_id"]
+        
+        # Create payment transaction record
+        transaction = PaymentTransaction(
+            transaction_id=f"TXN-{uuid_lib.uuid4().hex[:12].upper()}",
+            order_id=order_id,
+            razorpay_order_id=razorpay_order["razorpay_order_id"],
+            amount=price,
+            currency="INR",
+            status="created"
+        )
+        db.add(transaction)
+        db.commit()
+        
+        logger.info(f"Payment order created: {order_id}, Razorpay: {razorpay_order['razorpay_order_id']}")
+        
+        return {
+            "order_id": order_id,
+            "razorpay_order_id": razorpay_order["razorpay_order_id"],
+            "amount": price,
+            "currency": "INR",
+            "key_id": RAZORPAY_KEY_ID  # Frontend needs this
+        }
+        
+    except Exception as e:
+        # Cleanup: Delete order if Razorpay order creation fails
+        db.delete(order)
+        db.commit()
+        logger.error(f"Payment order creation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/orders/verify-payment")
+async def verify_payment(
+    payload: RazorpayVerifyRequest,  # ✅ Now reads JSON body
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Step 2: Verify payment and process order (AFTER payment success)
+    """
+    logger.info(f"Verifying payment: {payload.razorpay_payment_id}")
+    
+    # Find order by razorpay_order_id
+    order = db.query(Order).filter(Order.razorpay_order_id == payload.razorpay_order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Verify user owns this order
+    if order.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    # Verify signature
+    is_valid = verify_payment_signature(
+        payload.razorpay_order_id,
+        payload.razorpay_payment_id,
+        payload.razorpay_signature
+    )
+    
+    if not is_valid:
+        # Update transaction status
+        transaction = db.query(PaymentTransaction).filter(
+            PaymentTransaction.razorpay_order_id == payload.razorpay_order_id
+        ).first()
+        if transaction:
+            transaction.status = "failed"
+            transaction.gateway_response = {"error": "Invalid signature"}
+            db.commit()
+        
+        # Log to history
+        history = OrderHistory(
+            order_id=order.order_id,
+            status=OrderStatusEnum.FAILED,
+            message="Payment signature verification failed"
+        )
+        db.add(history)
+        db.commit()
+        
+        raise HTTPException(status_code=400, detail="Payment verification failed")
+    
+    # Payment verified successfully
+    order.razorpay_payment_id = payload.razorpay_payment_id
+    order.razorpay_signature = payload.razorpay_signature
+    order.payment_status = PaymentStatusEnum.PAID
+    db.commit()
+    db.refresh(order)
+    
+    # Update transaction
+    transaction = db.query(PaymentTransaction).filter(
+        PaymentTransaction.razorpay_order_id == payload.razorpay_order_id
+    ).first()
+    if transaction:
+        transaction.razorpay_payment_id = payload.razorpay_payment_id
+        transaction.razorpay_signature = payload.razorpay_signature
+        transaction.status = "success"
+        
+        # Get payment details from Razorpay
+        payment_details = get_payment_details(payload.razorpay_payment_id)
+        if payment_details:
+            transaction.gateway_response = payment_details
+        db.commit()
+        db.refresh(transaction)
+    
+    # Log payment success
+    history = OrderHistory(
+        order_id=order.order_id,
+        status=OrderStatusEnum.PENDING,
+        message="Payment verified successfully",
+        meta={"razorpay_payment_id": payload.razorpay_payment_id}
+    )
+    db.add(history)
+    db.commit()
+    
+    # Schedule print job as background task
+    background_tasks.add_task(process_print_job_bg, order.order_id, db)
+    
+    logger.info(f"✅ Payment verified for order {order.order_id}, scheduling print job")
+    
+    return {
+        "success": True,
+        "order_id": order.order_id,
+        "message": "Payment successful, order is being processed"
+    }
+
+
+async def process_print_job_bg(order_id: str, db: Session):
+    """
+    Background task: Schedule and send job to printer, then mark as completed
+    """
+    try:
+        order = db.query(Order).filter(Order.order_id == order_id).first()
+        if not order:
+            logger.error(f"Order {order_id} not found in background task")
+            return
+        
+        logger.info(f"Processing print job for order {order_id}")
+        
+        # Create scheduler job
+        scheduler_job = PrintJob(
+            job_id=order_id,
+            pages=order.pages_count,
+            copies=order.copies,
+            color_mode=SchedulerColorMode.COLOR if order.print_settings.get("color_mode") == "color" else SchedulerColorMode.BW,
+            priority=order.print_settings.get("priority", 2),
+            submitted_at=datetime.now(),
+            user_id=order.user_id
+        )
+        
+        # Schedule job
+        scheduled = scheduler.schedule_job(scheduler_job)
+        
+        if not scheduled:
+            order.status = OrderStatusEnum.FAILED
+            history = OrderHistory(
+                order_id=order_id,
+                status=OrderStatusEnum.FAILED,
+                message="No printer available"
+            )
+            db.add(history)
+            db.commit()
+            logger.warning(f"No printer available for order {order_id}")
+            return
+        
+        # Update order with printer assignment
+        order.printer_id = scheduled.printer_id
+        order.estimated_start_time = scheduled.start_time
+        order.estimated_end_time = scheduled.end_time
+        order.status = OrderStatusEnum.PROCESSING
+        
+        history = OrderHistory(
+            order_id=order_id,
+            status=OrderStatusEnum.PROCESSING,
+            message=f"Job scheduled to printer {scheduled.printer_id}",
+            meta={
+                "printer_id": scheduled.printer_id,
+                "estimated_start": scheduled.start_time.isoformat(),
+                "estimated_end": scheduled.end_time.isoformat()
+            }
+        )
+        db.add(history)
+        db.commit()
+        
+        logger.info(f"Order {order_id} scheduled to printer {scheduled.printer_id}")
+        
+        # Send to printer API
+        try:
+            await send_to_printer_api(
+                scheduled.printer_id,
+                order_id,
+                order.pages_count,
+                order.copies,
+                order.print_settings.get("color_mode", "bw")
+            )
+            
+            order.actual_start_time = datetime.now()
+            
+            # ✅ Simulate completion or mark as done after successful send
+            order.status = OrderStatusEnum.COMPLETED
+            order.actual_end_time = datetime.now()
+            
+            # Log print start
+            history_start = OrderHistory(
+                order_id=order_id,
+                status=OrderStatusEnum.PROCESSING,
+                message="Job sent to printer successfully"
+            )
+            db.add(history_start)
+            
+            # Log completion
+            history_complete = OrderHistory(
+                order_id=order_id,
+                status=OrderStatusEnum.COMPLETED,
+                message="Job printed successfully and marked as completed"
+            )
+            db.add(history_complete)
+            
+            db.commit()
+            logger.info(f"✅ Order {order_id} printed successfully and marked as COMPLETED")
+            
+        except Exception as e:
+            order.status = OrderStatusEnum.FAILED
+            history = OrderHistory(
+                order_id=order_id,
+                status=OrderStatusEnum.FAILED,
+                message=f"Failed to send to printer: {str(e)}"
+            )
+            db.add(history)
+            db.commit()
+            logger.error(f"Failed to send order {order_id} to printer: {e}")
+            
+    except Exception as e:
+        logger.error(f"Background task error for order {order_id}: {e}")
+
+
+@app.get("/orders/{order_id}/history")
+def get_order_history(
+    order_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get complete order history timeline
+    """
+    order = db.query(Order).filter(Order.order_id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Verify user owns this order
+    if order.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    history = db.query(OrderHistory).filter(
+        OrderHistory.order_id == order_id
+    ).order_by(OrderHistory.created_at.asc()).all()
+    
+    return {
+        "order_id": order_id,
+        "total_events": len(history),
+        "history": history
+    }
 
 if __name__ == "__main__":
     import uvicorn
