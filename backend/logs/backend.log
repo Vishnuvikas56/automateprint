@@ -1,0 +1,124 @@
+2025-11-11 01:25:28 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 01:25:28 - backend - INFO - ✓ Database initialized
+2025-11-11 01:25:28 - backend - ERROR - ✗ Scheduler initialization failed: All connection attempts failed
+2025-11-11 01:29:31 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 01:29:31 - backend - INFO - ✓ Database initialized
+2025-11-11 01:29:31 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 01:29:38 - backend - INFO - Signup attempt: vishnuvikas5656
+2025-11-11 01:29:39 - backend - INFO - User created: USER-DB6B2C22
+2025-11-11 01:32:19 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 01:32:19 - backend - INFO - ✓ Database initialized
+2025-11-11 01:32:19 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 01:32:47 - backend - INFO - Order from user vishnuvikas5656: 5p × 2, bw
+2025-11-11 01:33:06 - backend - INFO - Order from user vishnuvikas5656: 5p × 2, bw
+2025-11-11 01:34:14 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 01:34:15 - backend - INFO - ✓ Database initialized
+2025-11-11 01:34:15 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 01:34:19 - backend - INFO - Order from user vishnuvikas5656: 5p × 2, bw
+2025-11-11 01:34:19 - backend - INFO - Order ORD-65F00657 scheduled to P1, price=20.0
+2025-11-11 01:34:19 - backend - INFO - Order ORD-65F00657 sent to printer successfully
+2025-11-11 01:39:35 - backend - INFO - Signin attempt: vishnuvikas5656@gmail.com
+2025-11-11 01:39:44 - backend - INFO - Signin attempt: vishnuvikas5656@gmail.com
+2025-11-11 01:40:48 - backend - INFO - Signin attempt: vishnuvikas5656@gmail.com
+2025-11-11 01:40:56 - backend - INFO - Signin attempt: vishnuvikas5656@gmail.com
+2025-11-11 01:41:10 - backend - INFO - Signin attempt: vishnuvikas5656@gmail.com
+2025-11-11 01:41:34 - backend - INFO - Signin attempt: vishnuvikas5656
+2025-11-11 01:41:34 - backend - INFO - User signed in: USER-DB6B2C22
+2025-11-11 01:42:19 - backend - INFO - Order from user vishnuvikas5656: 10p × 5, color
+2025-11-11 01:42:19 - backend - INFO - Order ORD-DDF18726 scheduled to P5, price=500.0
+2025-11-11 01:42:19 - backend - INFO - Order ORD-DDF18726 sent to printer successfully
+2025-11-11 01:59:23 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 01:59:23 - backend - INFO - ✓ Database initialized
+2025-11-11 01:59:23 - backend - ERROR - ✗ Scheduler initialization failed: All connection attempts failed
+2025-11-11 01:59:47 - backend - INFO - Order from user vishnuvikas5656: 1p × 20, bw
+2025-11-11 01:59:57 - backend - INFO - Order from user vishnuvikas5656: 1p × 20, bw
+2025-11-11 02:00:47 - backend - INFO - Order from user vishnuvikas5656: 1p × 20, bw
+2025-11-11 02:00:57 - backend - INFO - Order from user vishnuvikas5656: 1p × 20, bw
+2025-11-11 02:02:24 - backend - INFO - Order from user vishnuvikas5656: 1p × 1, bw
+2025-11-11 02:02:56 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 02:02:56 - backend - INFO - ✓ Database initialized
+2025-11-11 02:02:56 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 02:08:55 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 02:08:55 - backend - INFO - ✓ Database initialized
+2025-11-11 02:08:56 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 02:09:01 - backend - INFO - Order from user vishnuvikas5656: 1p × 1, bw
+2025-11-11 02:09:01 - backend - INFO - Order ORD-103FD2A0 scheduled to P1, price=2.0
+2025-11-11 02:09:01 - backend - INFO - Order ORD-103FD2A0 sent to printer successfully
+2025-11-11 02:09:09 - backend - INFO - Order from user vishnuvikas5656: 1p × 10, bw
+2025-11-11 02:09:09 - backend - INFO - Order ORD-7709807D scheduled to P2, price=20.0
+2025-11-11 02:09:09 - backend - INFO - Order ORD-7709807D sent to printer successfully
+2025-11-11 02:09:16 - backend - INFO - Order from user vishnuvikas5656: 1p × 10, bw
+2025-11-11 02:09:16 - backend - INFO - Order ORD-8F7269DD scheduled to P3, price=20.0
+2025-11-11 02:09:16 - backend - INFO - Order ORD-8F7269DD sent to printer successfully
+2025-11-11 02:09:30 - backend - INFO - Order from user vishnuvikas5656: 1p × 5, bw
+2025-11-11 02:09:30 - backend - INFO - Order ORD-170F9385 scheduled to P4, price=10.0
+2025-11-11 02:09:30 - backend - INFO - Order ORD-170F9385 sent to printer successfully
+2025-11-11 02:09:41 - backend - INFO - Order from user vishnuvikas5656: 1p × 10, bw
+2025-11-11 02:09:41 - backend - INFO - Order ORD-A29E822D scheduled to P5, price=20.0
+2025-11-11 02:09:41 - backend - INFO - Order ORD-A29E822D sent to printer successfully
+2025-11-11 02:09:48 - backend - INFO - Order from user vishnuvikas5656: 1p × 10, bw
+2025-11-11 02:09:48 - backend - INFO - Order ORD-AD3A0602 scheduled to P6, price=20.0
+2025-11-11 02:09:48 - backend - INFO - Order ORD-AD3A0602 sent to printer successfully
+2025-11-11 02:10:21 - backend - INFO - Order from user vishnuvikas5656: 1p × 1, bw
+2025-11-11 02:10:21 - backend - INFO - Order ORD-853C5F2B scheduled to P1, price=2.0
+2025-11-11 02:10:21 - backend - INFO - Order ORD-853C5F2B sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 3p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-112CFB6D scheduled to P2, price=60.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-112CFB6D sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 3p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-51BFB2E0 scheduled to P3, price=60.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-51BFB2E0 sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 3p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-CE93C9FC scheduled to P4, price=60.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-CE93C9FC sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 4p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-EB78A0BE scheduled to P5, price=80.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-EB78A0BE sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 3p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-20C034F3 scheduled to P6, price=60.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-20C034F3 sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 4p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-7E0B5B44 scheduled to P1, price=80.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-7E0B5B44 sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 3p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-E47B74D5 scheduled to P4, price=60.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-E47B74D5 sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 5p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-F4581B0D scheduled to P2, price=100.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-F4581B0D sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 2p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-5B60713A scheduled to P3, price=40.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-5B60713A sent to printer successfully
+2025-11-11 02:13:25 - backend - INFO - Order from user vishnuvikas5656: 3p × 10, bw
+2025-11-11 02:13:25 - backend - INFO - Order ORD-19B0CBA0 scheduled to P6, price=60.0
+2025-11-11 02:13:25 - backend - INFO - Order ORD-19B0CBA0 sent to printer successfully
+2025-11-11 02:14:57 - backend - INFO - 🛑 Shutting down Backend API...
+2025-11-11 15:58:10 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 15:58:10 - backend - INFO - ✓ Database initialized
+2025-11-11 15:58:10 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 15:58:21 - backend - INFO - 🛑 Shutting down Backend API...
+2025-11-11 16:03:38 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 16:03:38 - backend - INFO - ✓ Database initialized
+2025-11-11 16:03:38 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 16:04:24 - backend - INFO - Signin attempt: vishnuvikas5656
+2025-11-11 16:04:40 - backend - INFO - Signin attempt: vishnuvikas5656
+2025-11-11 16:05:36 - backend - INFO - 🛑 Shutting down Backend API...
+2025-11-11 16:05:44 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 16:05:44 - backend - INFO - ✓ Database initialized
+2025-11-11 16:05:44 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 16:05:48 - backend - INFO - Signin attempt: vishnuvikas5656
+2025-11-11 16:06:45 - backend - INFO - 🛑 Shutting down Backend API...
+2025-11-11 16:06:46 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 16:06:46 - backend - INFO - ✓ Database initialized
+2025-11-11 16:06:47 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 16:06:54 - backend - INFO - Signin attempt: vishnuvikas5656
+2025-11-11 16:06:55 - backend - INFO - User signed in: USER-DB6B2C22
+2025-11-11 16:07:52 - backend - INFO - 🛑 Shutting down Backend API...
+2025-11-11 16:07:54 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 16:07:54 - backend - INFO - ✓ Database initialized
+2025-11-11 16:07:54 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 16:09:58 - backend - INFO - 🛑 Shutting down Backend API...
+2025-11-11 16:10:00 - backend - INFO - 🚀 Starting Backend API...
+2025-11-11 16:10:00 - backend - INFO - ✓ Database initialized
+2025-11-11 16:10:00 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-11 16:38:12 - backend - INFO - 🛑 Shutting down Backend API...
