@@ -112,3 +112,19 @@
 2025-11-12 00:52:10 - printer_simulation - INFO - [P1] Job ORD-95CDC44D - 50% complete
 2025-11-12 00:52:11 - printer_simulation - INFO - [P1] Job ORD-95CDC44D completed in 1.0s
 2025-11-12 00:52:11 - printer_simulation - INFO - [P1] Now idle
+2025-11-12 11:23:32 - printer_simulation - INFO - 🚀 Printer Simulation API started
+2025-11-12 11:28:02 - printer_simulation - INFO - Job ORD-785F79C9 submitted to P1
+2025-11-12 11:28:02 - printer_simulation - INFO - [P1] Starting job ORD-785F79C9 - 1 pages, 1 copies, bw
+2025-11-12 11:28:02 - printer_simulation - INFO - [P1] Job ORD-785F79C9 - 50% complete
+2025-11-12 11:28:03 - printer_simulation - INFO - [P1] Job ORD-785F79C9 completed in 1.0s
+2025-11-12 11:28:03 - printer_simulation - INFO - [P1] Now idle
+2025-11-12 11:29:19 - printer_simulation - INFO - Job ORD-AE3E1389 submitted to P2
+2025-11-12 11:29:19 - printer_simulation - INFO - [P2] Starting job ORD-AE3E1389 - 13 pages, 5 copies, bw
+2025-11-12 11:29:52 - printer_simulation - INFO - [P2] Job ORD-AE3E1389 - 50% complete
+2025-11-12 11:30:24 - printer_simulation - INFO - [P2] Job ORD-AE3E1389 completed in 65.0s
+2025-11-12 11:30:24 - printer_simulation - INFO - [P2] Now idle
+2025-11-12 11:36:31 - printer_simulation - INFO - Job ORD-C419CF66 submitted to P3
+2025-11-12 11:36:31 - printer_simulation - INFO - [P3] Starting job ORD-C419CF66 - 10 pages, 10 copies, bw
+2025-11-12 11:37:21 - printer_simulation - INFO - [P3] Job ORD-C419CF66 - 50% complete
+2025-11-12 11:38:11 - printer_simulation - INFO - [P3] Job ORD-C419CF66 completed in 100.0s
+2025-11-12 11:38:11 - printer_simulation - INFO - [P3] Now idle

@@ -3,7 +3,8 @@ Job Management FastAPI Server with PostgreSQL and Authentication
 Run: uvicorn backend:app --port 8000 --reload
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status, Header, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, status, Header, BackgroundTasks, File, UploadFile
+from storage import upload_pdf_to_gcs
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
@@ -625,11 +626,13 @@ async def reset_system(db: Session = Depends(get_db)):
 @app.post("/orders/create-payment")
 async def create_payment_order(
     request: SubmitJobRequest,
+    file_url: Optional[str] = None,  # ✅ NEW: Optional file URL
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Step 1: Create order and Razorpay payment order (BEFORE payment)
+    Now supports file_url from uploaded PDF
     """
     logger.info(f"Creating payment order for user {current_user.username}")
     
@@ -649,7 +652,8 @@ async def create_payment_order(
         },
         price=price,
         status=OrderStatusEnum.PENDING,
-        payment_status=PaymentStatusEnum.UNPAID
+        payment_status=PaymentStatusEnum.UNPAID,
+        file_url=file_url  # ✅ Store GCS URL
     )
     
     db.add(order)
@@ -660,7 +664,7 @@ async def create_payment_order(
     history = OrderHistory(
         order_id=order_id,
         status=OrderStatusEnum.PENDING,
-        message="Order created, awaiting payment"
+        message=f"Order created, awaiting payment{' (with file)' if file_url else ''}"
     )
     db.add(history)
     
@@ -690,7 +694,8 @@ async def create_payment_order(
             "razorpay_order_id": razorpay_order["razorpay_order_id"],
             "amount": price,
             "currency": "INR",
-            "key_id": RAZORPAY_KEY_ID  # Frontend needs this
+            "key_id": RAZORPAY_KEY_ID,
+            "file_uploaded": bool(file_url)
         }
         
     except Exception as e:
@@ -797,7 +802,7 @@ async def verify_payment(
 
 async def process_print_job_bg(order_id: str, db: Session):
     """
-    Background task: Schedule and send job to printer, then mark as completed
+    Background task: Schedule and send job to printer with file URL
     """
     try:
         order = db.query(Order).filter(Order.order_id == order_id).first()
@@ -846,7 +851,8 @@ async def process_print_job_bg(order_id: str, db: Session):
             meta={
                 "printer_id": scheduled.printer_id,
                 "estimated_start": scheduled.start_time.isoformat(),
-                "estimated_end": scheduled.end_time.isoformat()
+                "estimated_end": scheduled.end_time.isoformat(),
+                "has_file": bool(order.file_url)
             }
         )
         db.add(history)
@@ -854,19 +860,23 @@ async def process_print_job_bg(order_id: str, db: Session):
         
         logger.info(f"Order {order_id} scheduled to printer {scheduled.printer_id}")
         
-        # Send to printer API
+        # Send to printer API with file_url
         try:
-            await send_to_printer_api(
-                scheduled.printer_id,
-                order_id,
-                order.pages_count,
-                order.copies,
-                order.print_settings.get("color_mode", "bw")
-            )
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{PRINTER_API_URL}/printers/{scheduled.printer_id}/print",
+                    json={
+                        "job_id": order_id,
+                        "pages": order.pages_count,
+                        "copies": order.copies,
+                        "color_mode": order.print_settings.get("color_mode", "bw"),
+                        "priority": 2,
+                        "file_url": order.file_url  # ✅ Send file URL to printer
+                    }
+                )
+                response.raise_for_status()
             
             order.actual_start_time = datetime.now()
-            
-            # ✅ Simulate completion or mark as done after successful send
             order.status = OrderStatusEnum.COMPLETED
             order.actual_end_time = datetime.now()
             
@@ -887,7 +897,7 @@ async def process_print_job_bg(order_id: str, db: Session):
             db.add(history_complete)
             
             db.commit()
-            logger.info(f"✅ Order {order_id} printed successfully and marked as COMPLETED")
+            logger.info(f"✅ Order {order_id} printed successfully")
             
         except Exception as e:
             order.status = OrderStatusEnum.FAILED
@@ -902,7 +912,6 @@ async def process_print_job_bg(order_id: str, db: Session):
             
     except Exception as e:
         logger.error(f"Background task error for order {order_id}: {e}")
-
 
 @app.get("/orders/{order_id}/history")
 def get_order_history(
@@ -930,6 +939,110 @@ def get_order_history(
         "total_events": len(history),
         "history": history
     }
+
+@app.post("/orders/upload-file")
+async def upload_order_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload PDF file to GCS (before order creation)
+    Single file upload - max 100MB
+    """
+    # Validate file type
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+    
+    # Read file content
+    file_content = await file.read()
+    file_size_mb = len(file_content) / (1024 * 1024)
+    
+    # Validate file size (100MB max)
+    if file_size_mb > 100:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"File too large: {file_size_mb:.2f}MB (max 100MB)"
+        )
+    
+    # Generate temporary order ID for file organization
+    temp_order_id = f"TEMP-{uuid.uuid4().hex[:8].upper()}"
+    
+    # Upload to GCS
+    file_url = upload_pdf_to_gcs(file_content, file.filename, temp_order_id)
+    
+    if not file_url:
+        raise HTTPException(status_code=500, detail="File upload failed")
+    
+    logger.info(f"File uploaded for user {current_user.username}: {file.filename}")
+    
+    return {
+        "success": True,
+        "file_url": file_url,
+        "filename": file.filename,
+        "size_mb": round(file_size_mb, 2),
+        "temp_order_id": temp_order_id
+    }
+
+
+# ==================== NEW ROUTE: Bulk File Upload ====================
+
+@app.post("/orders/upload-bulk-files")
+async def upload_bulk_files(
+    files: List[UploadFile] = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload multiple PDF files (max 10 files, 25MB each)
+    """
+    # Validate file count
+    if len(files) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 files allowed")
+    
+    temp_order_id = f"BULK-{uuid.uuid4().hex[:8].upper()}"
+    uploaded_files = []
+    
+    for file in files:
+        # Validate file type
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid file type: {file.filename} (only PDF allowed)"
+            )
+        
+        # Read and validate size
+        file_content = await file.read()
+        file_size_mb = len(file_content) / (1024 * 1024)
+        
+        if file_size_mb > 25:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{file.filename} too large: {file_size_mb:.2f}MB (max 25MB)"
+            )
+        
+        # Upload to GCS
+        file_url = upload_pdf_to_gcs(file_content, file.filename, temp_order_id)
+        
+        if not file_url:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Upload failed for {file.filename}"
+            )
+        
+        uploaded_files.append({
+            "filename": file.filename,
+            "file_url": file_url,
+            "size_mb": round(file_size_mb, 2)
+        })
+    
+    logger.info(f"Bulk upload: {len(files)} files for user {current_user.username}")
+    
+    return {
+        "success": True,
+        "temp_order_id": temp_order_id,
+        "files": uploaded_files,
+        "total_files": len(uploaded_files)
+    }
+
 
 if __name__ == "__main__":
     import uvicorn

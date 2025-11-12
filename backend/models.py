@@ -181,6 +181,7 @@ class Order(Base):
     razorpay_order_id = Column(String(100), unique=True)
     razorpay_payment_id = Column(String(100), unique=True)
     razorpay_signature = Column(String(255))
+    file_url = Column(Text, nullable=True)
     
     # Scheduling fields
     estimated_start_time = Column(DateTime, nullable=True)

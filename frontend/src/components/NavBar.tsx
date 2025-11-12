@@ -33,6 +33,13 @@ const Navbar: React.FC = () => {
                   <span>New Order</span>
                 </Link>
                 <Link
+                  to="/bulk-order"
+                  className="flex items-center space-x-1 px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-gray-50"
+                >
+                  <FileText className="h-4 w-4" />
+                  <span>Bulk Order</span>
+                </Link>
+                <Link
                   to="/my-orders"
                   className="flex items-center space-x-1 px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:text-blue-600 hover:bg-gray-50"
                 >

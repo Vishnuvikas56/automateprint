@@ -71,6 +71,7 @@ class PrintRequest(BaseModel):
     copies: int
     color_mode: ColorMode
     priority: int = 2
+    file_url: Optional[str] = None
 
 class PrinterInfo(BaseModel):
     printer_id: str
@@ -295,6 +296,7 @@ async def submit_print_job(printer_id: str, request: PrintRequest, background_ta
         "copies": request.copies,
         "color_mode": request.color_mode,
         "priority": request.priority,
+        "file_url": request.file_url,  # ✅ Store file URL
         "started_at": None,
         "completed_at": None,
         "progress_percent": 0,
@@ -302,7 +304,10 @@ async def submit_print_job(printer_id: str, request: PrintRequest, background_ta
     }
     
     JOBS[request.job_id] = job_data
-    logger.info(f"Job {request.job_id} submitted to {printer_id}")
+    
+    # Log with file info
+    file_info = f" (with file: {request.file_url})" if request.file_url else ""
+    logger.info(f"Job {request.job_id} submitted to {printer_id}{file_info}")
     
     # If printer is idle, start immediately
     if printer["status"] == PrinterStatus.IDLE:
@@ -318,9 +323,10 @@ async def submit_print_job(printer_id: str, request: PrintRequest, background_ta
         "job_id": request.job_id,
         "printer_id": printer_id,
         "status": job_data["status"],
-        "queue_position": len(printer["queue"]) if job_data["status"] == JobStatus.QUEUED else 0
+        "queue_position": len(printer["queue"]) if job_data["status"] == JobStatus.QUEUED else 0,
+        "has_file": bool(request.file_url)
     }
-
+    
 @app.get("/jobs/{job_id}", response_model=JobInfo)
 def get_job_status(job_id: str):
     """Get status of a specific print job"""

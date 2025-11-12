@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { FileText, Loader, CheckCircle, XCircle, Upload, X } from 'lucide-react';
+import { FileText, Loader, CheckCircle, XCircle, Upload, X, Plus } from 'lucide-react';
 import PaymentModal from '../components/PaymentModal';
 
 const API_BASE_URL = 'http://localhost:8000';
@@ -9,25 +9,26 @@ const API_BASE_URL = 'http://localhost:8000';
 interface Store {
   store_id: string;
   store_name: string;
-  pricing_info: {
-    bw_per_page: number;
-    color_per_page: number;
-  };
+  pricing_info: { bw_per_page: number; color_per_page: number };
 }
 
-export const NewOrder: React.FC = () => {
+interface UploadedFile {
+  filename: string;
+  file_url: string;
+  size_mb: number;
+}
+
+export const BulkOrder: React.FC = () => {
   const navigate = useNavigate();
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
-  // File upload states
-  const [uploadedFile, setUploadedFile] = useState<any>(null);
-  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
-  // Payment states
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentDetails, setPaymentDetails] = useState<any>(null);
   const [paymentError, setPaymentError] = useState('');
@@ -35,21 +36,21 @@ export const NewOrder: React.FC = () => {
 
   const [formData, setFormData] = useState({
     store_id: 'STORE001',
-    pages: 1,
+    pages: 10,
     copies: 1,
     color_mode: 'bw',
     priority: 2,
   });
 
-  const [estimatedPrice, setEstimatedPrice] = useState(0);
+  const [totalPrice, setTotalPrice] = useState(0);
 
   useEffect(() => {
     fetchStores();
   }, []);
 
   useEffect(() => {
-    calculatePrice();
-  }, [formData.pages, formData.copies, formData.color_mode, formData.store_id, stores]);
+    calculateTotalPrice();
+  }, [formData, uploadedFiles, stores]);
 
   const fetchStores = async () => {
     try {
@@ -60,7 +61,9 @@ export const NewOrder: React.FC = () => {
     }
   };
 
-  const calculatePrice = () => {
+  const calculateTotalPrice = () => {
+    if (uploadedFiles.length === 0) return;
+
     const store = stores.find((s) => s.store_id === formData.store_id);
     if (!store) return;
 
@@ -69,69 +72,83 @@ export const NewOrder: React.FC = () => {
         ? store.pricing_info.color_per_page
         : store.pricing_info.bw_per_page;
 
-    const total = formData.pages * formData.copies * pricePerPage;
-    setEstimatedPrice(total);
+    const total = formData.pages * formData.copies * uploadedFiles.length * pricePerPage;
+    setTotalPrice(total);
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFilesSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
 
-    // Validate file type
-    if (file.type !== 'application/pdf') {
-      setUploadError('Only PDF files are allowed');
+    if (files.length === 0) return;
+    if (files.length > 10) {
+      setUploadError('Maximum 10 files allowed');
       return;
     }
 
-    // Validate file size (100MB max)
-    const fileSizeMB = file.size / (1024 * 1024);
-    if (fileSizeMB > 100) {
-      setUploadError(`File too large: ${fileSizeMB.toFixed(2)}MB (max 100MB)`);
-      return;
+    // Validate all files first
+    for (const file of files) {
+      if (file.type !== 'application/pdf') {
+        setUploadError(`${file.name} is not a PDF file`);
+        return;
+      }
+      const fileSizeMB = file.size / (1024 * 1024);
+      if (fileSizeMB > 25) {
+        setUploadError(`${file.name} is too large (${fileSizeMB.toFixed(2)}MB, max 25MB)`);
+        return;
+      }
     }
 
-    setUploadingFile(true);
+    setUploadingFiles(true);
     setUploadError('');
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      files.forEach((file) => formData.append('files', file));
 
-      const response = await axios.post(`${API_BASE_URL}/orders/upload-file`, formData, {
+      const response = await axios.post(`${API_BASE_URL}/orders/upload-bulk-files`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      setUploadedFile(response.data);
+      setUploadedFiles(response.data.files);
     } catch (err: any) {
-      setUploadError(err.response?.data?.detail || 'File upload failed');
+      setUploadError(err.response?.data?.detail || 'Bulk upload failed');
     } finally {
-      setUploadingFile(false);
+      setUploadingFiles(false);
     }
   };
 
-  const handleRemoveFile = () => {
-    setUploadedFile(null);
-    setUploadError('');
+  const handleRemoveFile = (index: number) => {
+    setUploadedFiles(uploadedFiles.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (uploadedFiles.length === 0) {
+      setError('Please upload at least one PDF file');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
     try {
-      // Create order with file_url
-      const payload: any = { ...formData };
-      if (uploadedFile) {
-        payload.file_url = uploadedFile.file_url;
-      }
+      // Create multiple orders, one per file
+      const orderPromises = uploadedFiles.map((file) =>
+        axios.post(`${API_BASE_URL}/orders/create-payment`, {
+          ...formData,
+          file_url: file.file_url,
+        })
+      );
 
-      const response = await axios.post(`${API_BASE_URL}/orders/create-payment`, payload);
+      const responses = await Promise.all(orderPromises);
 
-      setPaymentDetails(response.data);
+      // For simplicity, use first order's payment details
+      // In production, consider bulk payment or single combined payment
+      setPaymentDetails(responses[0].data);
       setShowPaymentModal(true);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create order');
+      setError(err.response?.data?.detail || 'Failed to create orders');
     } finally {
       setLoading(false);
     }
@@ -150,9 +167,7 @@ export const NewOrder: React.FC = () => {
 
       if (response.data.success) {
         setSuccess(true);
-        setTimeout(() => {
-          navigate('/my-orders');
-        }, 2000);
+        setTimeout(() => navigate('/my-orders'), 2000);
       }
     } catch (err: any) {
       setPaymentError(err.response?.data?.detail || 'Payment verification failed');
@@ -172,17 +187,17 @@ export const NewOrder: React.FC = () => {
     return (
       <div className="max-w-2xl mx-auto px-4 py-20 text-center">
         <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-4" />
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">Order Placed Successfully!</h2>
-        <p className="text-gray-600">Your print job is being processed...</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Bulk Orders Placed Successfully!</h2>
+        <p className="text-gray-600">{uploadedFiles.length} print jobs are being processed...</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Create Print Order</h1>
-        <p className="text-gray-600 mt-2">Fill in the details for your print job</p>
+        <h1 className="text-3xl font-bold text-gray-900">Bulk Print Order</h1>
+        <p className="text-gray-600 mt-2">Upload multiple PDFs (max 10 files, 25MB each)</p>
       </div>
 
       {error && <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-lg">{error}</div>}
@@ -191,46 +206,63 @@ export const NewOrder: React.FC = () => {
         {/* File Upload Section */}
         <div className="mb-6 p-4 border-2 border-dashed border-gray-300 rounded-lg">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Upload PDF (Optional - Max 100MB)
+            Upload PDFs (Max 10 files, 25MB each)
           </label>
 
-          {!uploadedFile ? (
-            <div className="flex items-center justify-center">
+          {uploadedFiles.length === 0 ? (
+            <div className="flex items-center justify-center py-8">
               <label className="cursor-pointer flex flex-col items-center space-y-2">
-                <Upload className="h-12 w-12 text-gray-400" />
-                <span className="text-sm text-gray-600">Click to upload PDF</span>
+                <Plus className="h-12 w-12 text-gray-400" />
+                <span className="text-sm text-gray-600">Click to select multiple PDFs</span>
                 <input
                   type="file"
                   accept="application/pdf"
-                  onChange={handleFileSelect}
+                  multiple
+                  onChange={handleFilesSelect}
                   className="hidden"
-                  disabled={uploadingFile}
+                  disabled={uploadingFiles}
                 />
               </label>
             </div>
           ) : (
-            <div className="flex items-center justify-between bg-green-50 p-3 rounded">
-              <div className="flex items-center space-x-3">
-                <FileText className="h-8 w-8 text-green-600" />
-                <div>
-                  <p className="font-medium text-gray-900">{uploadedFile.filename}</p>
-                  <p className="text-sm text-gray-600">{uploadedFile.size_mb} MB</p>
+            <div className="space-y-2">
+              {uploadedFiles.map((file, index) => (
+                <div key={index} className="flex items-center justify-between bg-green-50 p-3 rounded">
+                  <div className="flex items-center space-x-3">
+                    <FileText className="h-6 w-6 text-green-600" />
+                    <div>
+                      <p className="font-medium text-gray-900">{file.filename}</p>
+                      <p className="text-xs text-gray-600">{file.size_mb} MB</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveFile(index)}
+                    className="text-red-600 hover:text-red-800"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
                 </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleRemoveFile}
-                className="text-red-600 hover:text-red-800"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              ))}
+              <label className="cursor-pointer block text-center py-2 text-blue-600 hover:text-blue-800">
+                <Plus className="h-5 w-5 inline mr-2" />
+                Add more files
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  multiple
+                  onChange={handleFilesSelect}
+                  className="hidden"
+                  disabled={uploadingFiles}
+                />
+              </label>
             </div>
           )}
 
-          {uploadingFile && (
+          {uploadingFiles && (
             <div className="mt-2 text-center">
               <Loader className="animate-spin h-6 w-6 mx-auto text-blue-600" />
-              <p className="text-sm text-gray-600 mt-2">Uploading...</p>
+              <p className="text-sm text-gray-600 mt-2">Uploading files...</p>
             </div>
           )}
 
@@ -239,7 +271,7 @@ export const NewOrder: React.FC = () => {
           )}
         </div>
 
-        {/* Rest of the form fields */}
+        {/* Form Fields */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Store Location</label>
@@ -258,7 +290,9 @@ export const NewOrder: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Number of Pages</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Pages per Document
+            </label>
             <input
               type="number"
               value={formData.pages}
@@ -271,7 +305,7 @@ export const NewOrder: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Number of Copies</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Copies per Document</label>
             <input
               type="number"
               value={formData.copies}
@@ -295,37 +329,25 @@ export const NewOrder: React.FC = () => {
               <option value="color">Color</option>
             </select>
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
-            <select
-              value={formData.priority}
-              onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
-            >
-              <option value="1">Urgent</option>
-              <option value="2">Normal</option>
-              <option value="3">Low</option>
-            </select>
-          </div>
         </div>
 
-        <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-          <div className="flex justify-between items-center">
-            <span className="text-lg font-semibold text-gray-700">Total Amount:</span>
-            <span className="text-2xl font-bold text-blue-600">₹{estimatedPrice.toFixed(2)}</span>
+        {uploadedFiles.length > 0 && (
+          <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+            <div className="flex justify-between items-center">
+              <span className="text-lg font-semibold text-gray-700">Total Amount:</span>
+              <span className="text-2xl font-bold text-blue-600">₹{totalPrice.toFixed(2)}</span>
+            </div>
+            <p className="text-sm text-gray-600 mt-2">
+              {uploadedFiles.length} documents × {formData.pages} pages × {formData.copies} copies × ₹
+              {formData.color_mode === 'color' ? '10' : '2'}/page
+            </p>
           </div>
-          <p className="text-sm text-gray-600 mt-2">
-            {formData.pages} pages × {formData.copies} copies × ₹
-            {formData.color_mode === 'color' ? '10' : '2'}/page
-          </p>
-        </div>
+        )}
 
         <div className="mt-6 flex space-x-4">
           <button
             type="submit"
-            disabled={loading || uploadingFile}
+            disabled={loading || uploadingFiles || uploadedFiles.length === 0}
             className="flex-1 py-3 bg-blue-600 text-white rounded-md font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center"
           >
             {loading ? (

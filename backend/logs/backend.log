@@ -165,3 +165,40 @@
 2025-11-12 00:52:10 - backend - INFO - Processing print job for order ORD-95CDC44D
 2025-11-12 00:52:10 - backend - INFO - Order ORD-95CDC44D scheduled to printer P1
 2025-11-12 00:52:10 - backend - INFO - ✅ Order ORD-95CDC44D printed successfully and marked as COMPLETED
+2025-11-12 11:23:25 - backend - INFO - 🚀 Starting Backend API...
+2025-11-12 11:23:25 - backend - INFO - ✓ Database initialized
+2025-11-12 11:23:25 - backend - ERROR - ✗ Scheduler initialization failed: All connection attempts failed
+2025-11-12 11:26:26 - backend - INFO - 🛑 Shutting down Backend API...
+2025-11-12 11:26:29 - backend - INFO - 🚀 Starting Backend API...
+2025-11-12 11:26:29 - backend - INFO - ✓ Database initialized
+2025-11-12 11:26:29 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-12 11:26:58 - backend - INFO - 🛑 Shutting down Backend API...
+2025-11-12 11:27:01 - backend - INFO - 🚀 Starting Backend API...
+2025-11-12 11:27:01 - backend - INFO - ✓ Database initialized
+2025-11-12 11:27:01 - backend - INFO - ✓ Scheduler initialized with 6 printers
+2025-11-12 11:27:19 - backend - INFO - File uploaded for user vishnuvikas5656: MyResume- market analyst.pdf
+2025-11-12 11:27:35 - backend - INFO - Creating payment order for user vishnuvikas5656
+2025-11-12 11:27:36 - backend - INFO - Payment order created: ORD-785F79C9, Razorpay: order_ReimfmhteRVjXn
+2025-11-12 11:28:01 - backend - INFO - Verifying payment: pay_ReimtIvKTHJx8e
+2025-11-12 11:28:02 - backend - INFO - ✅ Payment verified for order ORD-785F79C9, scheduling print job
+2025-11-12 11:28:02 - backend - INFO - Processing print job for order ORD-785F79C9
+2025-11-12 11:28:02 - backend - INFO - Order ORD-785F79C9 scheduled to printer P1
+2025-11-12 11:28:02 - backend - INFO - ✅ Order ORD-785F79C9 printed successfully
+2025-11-12 11:28:40 - backend - INFO - File uploaded for user vishnuvikas5656: dc56528f-9fe3-46f3-8086-71c10550ae36.pdf
+2025-11-12 11:28:57 - backend - INFO - Creating payment order for user vishnuvikas5656
+2025-11-12 11:28:57 - backend - INFO - Payment order created: ORD-AE3E1389, Razorpay: order_Reio5d6bRzVVyh
+2025-11-12 11:29:19 - backend - INFO - Verifying payment: pay_ReioGQUPyETG11
+2025-11-12 11:29:19 - backend - INFO - ✅ Payment verified for order ORD-AE3E1389, scheduling print job
+2025-11-12 11:29:19 - backend - INFO - Processing print job for order ORD-AE3E1389
+2025-11-12 11:29:19 - backend - INFO - Order ORD-AE3E1389 scheduled to printer P2
+2025-11-12 11:29:19 - backend - INFO - ✅ Order ORD-AE3E1389 printed successfully
+2025-11-12 11:34:08 - backend - INFO - Bulk upload: 1 files for user vishnuvikas5656
+2025-11-12 11:34:32 - backend - INFO - File uploaded for user vishnuvikas5656: frontpages.pdf
+2025-11-12 11:34:52 - backend - INFO - Creating payment order for user vishnuvikas5656
+2025-11-12 11:36:10 - backend - INFO - Creating payment order for user vishnuvikas5656
+2025-11-12 11:36:10 - backend - INFO - Payment order created: ORD-C419CF66, Razorpay: order_ReivioDdpeZ6Ht
+2025-11-12 11:36:30 - backend - INFO - Verifying payment: pay_ReivrK1erc3qJU
+2025-11-12 11:36:31 - backend - INFO - ✅ Payment verified for order ORD-C419CF66, scheduling print job
+2025-11-12 11:36:31 - backend - INFO - Processing print job for order ORD-C419CF66
+2025-11-12 11:36:31 - backend - INFO - Order ORD-C419CF66 scheduled to printer P3
+2025-11-12 11:36:31 - backend - INFO - ✅ Order ORD-C419CF66 printed successfully
