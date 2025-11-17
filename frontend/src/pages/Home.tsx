@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { X, Loader, Printer, CheckCircle, Zap, Clock } from 'lucide-react';
+import { X, Loader, Users, Shield } from 'lucide-react';
 
 const Home: React.FC = () => {
   const { isAuthenticated, signin, signup } = useAuth();
   const navigate = useNavigate();
   
+  const [selectedRole, setSelectedRole] = useState<'customer' | 'supervisor' | null>(null);
   const [showSignIn, setShowSignIn] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -31,6 +32,11 @@ const Home: React.FC = () => {
       navigate('/dashboard');
     }
   }, [isAuthenticated, navigate]);
+
+  const handleRoleClick = (role: 'customer' | 'supervisor') => {
+    setSelectedRole(role);
+    setShowSignIn(true);
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,60 +75,49 @@ const Home: React.FC = () => {
     }
   };
 
+  const resetModals = () => {
+    setShowSignIn(false);
+    setShowSignUp(false);
+    setSelectedRole(null);
+    setError('');
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {/* Hero Section */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-        <div className="text-center">
-          <h1 className="text-5xl font-extrabold text-gray-900 mb-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center px-4">
+      <div className="max-w-4xl w-full">
+        <div className="text-center mb-12">
+          <h1 className="text-5xl font-extrabold text-gray-900 mb-4">
             Smart Print Automation System
           </h1>
-          <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-            AI-powered print scheduling for campus print shops. Submit orders online,
-            track in real-time, and get prints delivered faster than ever.
-          </p>
-          
-          <div className="flex justify-center space-x-4">
-            <button
-              onClick={() => setShowSignIn(true)}
-              className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition"
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => setShowSignUp(true)}
-              className="px-8 py-3 bg-white text-blue-600 border-2 border-blue-600 rounded-lg font-semibold hover:bg-blue-50 transition"
-            >
-              Sign Up
-            </button>
-          </div>
         </div>
 
-        {/* Features */}
-        <div className="mt-20 grid md:grid-cols-3 gap-8">
-          <div className="bg-white p-6 rounded-xl shadow-lg">
-            <Zap className="h-12 w-12 text-blue-600 mb-4" />
-            <h3 className="text-xl font-bold mb-2">Smart Scheduling</h3>
-            <p className="text-gray-600">
-              AI algorithm automatically assigns your print jobs to the fastest available printer
-            </p>
-          </div>
-          
-          <div className="bg-white p-6 rounded-xl shadow-lg">
-            <Clock className="h-12 w-12 text-blue-600 mb-4" />
-            <h3 className="text-xl font-bold mb-2">Real-Time Tracking</h3>
-            <p className="text-gray-600">
-              Monitor your print jobs live with accurate time estimates and progress updates
-            </p>
-          </div>
-          
-          <div className="bg-white p-6 rounded-xl shadow-lg">
-            <CheckCircle className="h-12 w-12 text-blue-600 mb-4" />
-            <h3 className="text-xl font-bold mb-2">Multiple Locations</h3>
-            <p className="text-gray-600">
-              Access print shops across campus with 6 printers supporting both BW and color
-            </p>
-          </div>
+        {/* Role Selection Buttons */}
+        <div className="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+          <button
+            onClick={() => handleRoleClick('customer')}
+            className="p-8 bg-white rounded-xl shadow-lg hover:shadow-xl transition border-2 border-transparent hover:border-blue-500 group"
+          >
+            <div className="flex flex-col items-center">
+              <div className="bg-blue-100 p-4 rounded-full mb-4 group-hover:bg-blue-200 transition">
+                <Users className="h-12 w-12 text-blue-600" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Customer</h2>
+              <p className="text-gray-600">Submit and track print orders</p>
+            </div>
+          </button>
+
+          <button
+            onClick={() => handleRoleClick('supervisor')}
+            className="p-8 bg-white rounded-xl shadow-lg hover:shadow-xl transition border-2 border-transparent hover:border-indigo-500 group"
+          >
+            <div className="flex flex-col items-center">
+              <div className="bg-indigo-100 p-4 rounded-full mb-4 group-hover:bg-indigo-200 transition">
+                <Shield className="h-12 w-12 text-indigo-600" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Supervisor</h2>
+              <p className="text-gray-600">Manage orders and printers</p>
+            </div>
+          </button>
         </div>
       </div>
 
@@ -131,16 +126,30 @@ const Home: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 relative">
             <button
-              onClick={() => setShowSignIn(false)}
+              onClick={resetModals}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
             >
               <X className="h-6 w-6" />
             </button>
 
-            <h2 className="text-2xl font-bold mb-6">Sign In</h2>
+            <div className="flex items-center justify-center mb-6">
+              {selectedRole === 'supervisor' ? (
+                <div className="bg-indigo-100 p-3 rounded-lg">
+                  <Shield className="h-8 w-8 text-indigo-600" />
+                </div>
+              ) : (
+                <div className="bg-blue-100 p-3 rounded-lg">
+                  <Users className="h-8 w-8 text-blue-600" />
+                </div>
+              )}
+            </div>
+
+            <h2 className="text-2xl font-bold mb-2 text-center">
+              {selectedRole === 'supervisor' ? 'Supervisor' : 'Customer'} Sign In
+            </h2>
 
             {error && (
-              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md">
+              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">
                 {error}
               </div>
             )}
@@ -175,7 +184,7 @@ const Home: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 bg-blue-600 text-white rounded-md font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center"
+                className={`w-full py-3 ${selectedRole === 'supervisor' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded-md font-semibold disabled:opacity-50 flex items-center justify-center transition`}
               >
                 {loading ? (
                   <>
@@ -195,7 +204,7 @@ const Home: React.FC = () => {
                   setShowSignIn(false);
                   setShowSignUp(true);
                 }}
-                className="text-blue-600 hover:underline"
+                className={`${selectedRole === 'supervisor' ? 'text-indigo-600' : 'text-blue-600'} hover:underline font-medium`}
               >
                 Sign Up
               </button>
@@ -209,16 +218,30 @@ const Home: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 relative">
             <button
-              onClick={() => setShowSignUp(false)}
+              onClick={resetModals}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
             >
               <X className="h-6 w-6" />
             </button>
 
-            <h2 className="text-2xl font-bold mb-6">Sign Up</h2>
+            <div className="flex items-center justify-center mb-6">
+              {selectedRole === 'supervisor' ? (
+                <div className="bg-indigo-100 p-3 rounded-lg">
+                  <Shield className="h-8 w-8 text-indigo-600" />
+                </div>
+              ) : (
+                <div className="bg-blue-100 p-3 rounded-lg">
+                  <Users className="h-8 w-8 text-blue-600" />
+                </div>
+              )}
+            </div>
+
+            <h2 className="text-2xl font-bold mb-2 text-center">
+              {selectedRole === 'supervisor' ? 'Supervisor' : 'Customer'} Sign Up
+            </h2>
 
             {error && (
-              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md">
+              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">
                 {error}
               </div>
             )}
@@ -278,7 +301,7 @@ const Home: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 bg-blue-600 text-white rounded-md font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center"
+                className={`w-full py-3 ${selectedRole === 'supervisor' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded-md font-semibold disabled:opacity-50 flex items-center justify-center transition`}
               >
                 {loading ? (
                   <>
@@ -298,7 +321,7 @@ const Home: React.FC = () => {
                   setShowSignUp(false);
                   setShowSignIn(true);
                 }}
-                className="text-blue-600 hover:underline"
+                className={`${selectedRole === 'supervisor' ? 'text-indigo-600' : 'text-blue-600'} hover:underline font-medium`}
               >
                 Sign In
               </button>

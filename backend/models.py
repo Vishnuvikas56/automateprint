@@ -1,5 +1,5 @@
 """
-SQLAlchemy Database Models - Updated with User table
+SQLAlchemy Database Models - Production-Grade with Job Queue Persistence
 """
 
 from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, JSON, ForeignKey, Text, Enum as SQLEnum
@@ -32,6 +32,8 @@ class PrinterStatusEnum(str, enum.Enum):
     OFFLINE = "Offline"
     ERROR = "Error"
     MAINTENANCE = "Maintenance"
+    BUSY = "Busy"
+    IDLE = "Idle"
 
 class StoreStatusEnum(str, enum.Enum):
     OPEN = "open"
@@ -44,11 +46,13 @@ class OrderStatusEnum(str, enum.Enum):
     COMPLETED = "Completed"
     CANCELLED = "Cancelled"
     FAILED = "Failed"
+    QUEUED = "Queued"
 
 class PaymentStatusEnum(str, enum.Enum):
     PAID = "Paid"
     UNPAID = "Unpaid"
     FAILED = "Failed"
+    REFUNDED = "Refunded"
 
 class AlertTypeEnum(str, enum.Enum):
     PAPER_EMPTY = "paper_empty"
@@ -58,6 +62,8 @@ class AlertTypeEnum(str, enum.Enum):
     JAM = "jam"
     OFFLINE = "offline"
     MAINTENANCE = "maintenance"
+    QUEUE_FULL = "queue_full"
+    RESOURCE_LOW = "resource_low"
     OTHER = "other"
 
 class AlertSeverityEnum(str, enum.Enum):
@@ -69,6 +75,13 @@ class AlertStatusEnum(str, enum.Enum):
     UNREAD = "Unread"
     ACKNOWLEDGED = "Acknowledged"
     RESOLVED = "Resolved"
+
+class JobQueueStatusEnum(str, enum.Enum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 # ==================== Models ====================
 
@@ -150,24 +163,36 @@ class Printer(Base):
     paper_capacity = Column(Integer, default=500)
     paper_available = Column(Integer, default=500)
     ink_toner_level = Column(JSON)
+    
+    # ✅ NEW: Job queue persistence
+    job_queue = Column(JSON, default=list)  # Store queue as JSON array
+    current_job_id = Column(String(50), nullable=True)  # Currently processing job
+    queue_length = Column(Integer, default=0)  # Quick queue size lookup
+    
     unauthorized_access = Column(Boolean, default=False)
     assigned_supervisor_id = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Hardware simulation data
+    temperature = Column(Float, default=22.0)
+    humidity = Column(Float, default=45.0)
+    total_pages_printed = Column(Integer, default=0)
+    last_maintenance = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
     store = relationship("Store", back_populates="printers")
     assigned_supervisor = relationship("SupervisorData")
     orders = relationship("Order", back_populates="printer")
     alerts = relationship("Alert", back_populates="printer")
+    job_queue_entries = relationship("JobQueueEntry", back_populates="printer", order_by="JobQueueEntry.queue_position")
 
 class Order(Base):
     __tablename__ = "orders"
-    
     order_id = Column(String(50), primary_key=True, index=True)
     user_id = Column(String(50), ForeignKey("users.user_id"), nullable=False, index=True)
     store_id = Column(String(50), ForeignKey("stores.store_id"), nullable=False)
-    printer_id = Column(String(50), ForeignKey("printers.printer_id"), nullable=True)
+    printer_id = Column(String(50), ForeignKey("printers.printer_id"), nullable=True, index=True)
     document_id = Column(String(255))
     order_date = Column(DateTime, default=datetime.utcnow, index=True)
     completion_date = Column(DateTime, nullable=True)
@@ -178,16 +203,28 @@ class Order(Base):
     price = Column(Float, nullable=False)
     payment_status = Column(SQLEnum(PaymentStatusEnum), default=PaymentStatusEnum.UNPAID)
     assigned_supervisor_id = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=True)
-    razorpay_order_id = Column(String(100), unique=True)
-    razorpay_payment_id = Column(String(100), unique=True)
+    
+    # Payment info
+    razorpay_order_id = Column(String(100))
+    razorpay_payment_id = Column(String(100))
     razorpay_signature = Column(String(255))
+    
+    # File storage
     file_url = Column(Text, nullable=True)
+    
+    # ✅ NEW: Bulk order tracking
+    bulk_order_id = Column(String(50), nullable=True, index=True)  # Links multiple orders together
     
     # Scheduling fields
     estimated_start_time = Column(DateTime, nullable=True)
     estimated_end_time = Column(DateTime, nullable=True)
     actual_start_time = Column(DateTime, nullable=True)
     actual_end_time = Column(DateTime, nullable=True)
+    
+    # Queue tracking
+    queue_position = Column(Integer, nullable=True)
+    scheduler_score = Column(Float, nullable=True)
+    scheduler_metadata = Column(JSON, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="orders")
@@ -197,6 +234,7 @@ class Order(Base):
     alerts = relationship("Alert", back_populates="order")
     payment_transactions = relationship("PaymentTransaction", back_populates="order")
     history = relationship("OrderHistory", back_populates="order", order_by="OrderHistory.created_at")
+    queue_entry = relationship("JobQueueEntry", back_populates="order", uselist=False)
 
 class Alert(Base):
     __tablename__ = "alerts"
@@ -213,39 +251,120 @@ class Alert(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     resolved_at = Column(DateTime, nullable=True)
     
+    # Additional context
+    # metadata = Column(JSON, nullable=True)
+    
     # Relationships
     store = relationship("Store", back_populates="alerts")
     printer = relationship("Printer", back_populates="alerts")
     order = relationship("Order", back_populates="alerts")
     supervisor = relationship("SupervisorData", back_populates="alerts")
 
-# Add these classes to your existing models.py file
-
 class PaymentTransaction(Base):
     __tablename__ = "payment_transactions"
     
     transaction_id = Column(String(100), primary_key=True, index=True)
-    order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=False)
+    order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=False, index=True)
     razorpay_order_id = Column(String(100), unique=True, nullable=False)
     razorpay_payment_id = Column(String(100), unique=True)
     razorpay_signature = Column(String(255))
     amount = Column(Float, nullable=False)
     currency = Column(String(10), default="INR")
-    status = Column(String(20), default="created")  # created, success, failed
+    status = Column(String(20), default="created")  # created, success, failed, refunded
     gateway_response = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
     # Relationships
     order = relationship("Order", back_populates="payment_transactions")
 
-
 class OrderHistory(Base):
     __tablename__ = "order_history"
+    
     history_id = Column(Integer, primary_key=True, autoincrement=True)
     order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=False, index=True)
     status = Column(SQLEnum(OrderStatusEnum), nullable=False)
     message = Column(Text)
-    meta = Column(JSON)  # Store any additional context
+    meta = Column(JSON)  # Additional context
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
     # Relationships
     order = relationship("Order", back_populates="history")
+
+# ✅ NEW: Job Queue Persistence Table
+class JobQueueEntry(Base):
+    """
+    Persistent job queue storage - tracks job position in printer queues
+    """
+    __tablename__ = "job_queue_entries"
+    
+    queue_id = Column(Integer, primary_key=True, autoincrement=True)
+    printer_id = Column(String(50), ForeignKey("printers.printer_id"), nullable=False, index=True)
+    order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=False, unique=True, index=True)
+    
+    # Queue management
+    queue_position = Column(Integer, nullable=False, index=True)  # Position in queue (0 = first)
+    priority = Column(Integer, default=5)  # Job priority (1-10, lower = higher priority)
+    
+    # Status
+    status = Column(SQLEnum(JobQueueStatusEnum), default=JobQueueStatusEnum.QUEUED, index=True)
+    
+    # Timing
+    queued_at = Column(DateTime, default=datetime.utcnow, index=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Metadata
+    suborder_types = Column(JSON, nullable=True)  # Types of prints in this job
+    scheduler_score = Column(Float, nullable=True)
+    estimated_duration_minutes = Column(Float, nullable=True)
+    
+    # Relationships
+    printer = relationship("Printer", back_populates="job_queue_entries")
+    order = relationship("Order", back_populates="queue_entry")
+    
+    def __repr__(self):
+        return f"<JobQueueEntry(printer={self.printer_id}, order={self.order_id}, pos={self.queue_position})>"
+
+# ✅ NEW: System Metrics for monitoring
+class SystemMetrics(Base):
+    """
+    Store system performance metrics over time
+    """
+    __tablename__ = "system_metrics"
+    
+    metric_id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    # Printer metrics
+    total_printers = Column(Integer, default=0)
+    idle_printers = Column(Integer, default=0)
+    busy_printers = Column(Integer, default=0)
+    error_printers = Column(Integer, default=0)
+    
+    # Order metrics
+    total_orders = Column(Integer, default=0)
+    pending_orders = Column(Integer, default=0)
+    processing_orders = Column(Integer, default=0)
+    completed_orders = Column(Integer, default=0)
+    failed_orders = Column(Integer, default=0)
+    
+    # Queue metrics
+    total_queued_jobs = Column(Integer, default=0)
+    average_queue_length = Column(Float, default=0.0)
+    max_queue_length = Column(Integer, default=0)
+    
+    # Performance metrics
+    average_wait_time_minutes = Column(Float, default=0.0)
+    average_processing_time_minutes = Column(Float, default=0.0)
+    success_rate_percentage = Column(Float, default=0.0)
+    
+    # Revenue metrics
+    total_revenue = Column(Float, default=0.0)
+    revenue_per_hour = Column(Float, default=0.0)
+    
+    # Additional data
+    # metadata = Column(JSON, nullable=True)
+    
+    def __repr__(self):
+        return f"<SystemMetrics(timestamp={self.timestamp}, orders={self.total_orders})>"

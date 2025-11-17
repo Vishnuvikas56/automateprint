@@ -3,8 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Navbar from './components/NavBar';
 import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
-import { NewOrder } from './pages/NewOrder';
-import { BulkOrder } from './pages/BulkOrder'
+import NewOrder from './pages/NewOrder';
 import { MyOrders } from './pages/MyOrders';
 import { StoresList } from './pages/StoresList';
 import { OrderHistory } from './pages/OrderHistory';
@@ -38,14 +37,6 @@ function AppContent() {
             element={
               <ProtectedRoute>
                 <NewOrder />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/bulk-order"
-            element={
-              <ProtectedRoute>
-                <BulkOrder />
               </ProtectedRoute>
             }
           />

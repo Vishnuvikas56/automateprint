@@ -128,3 +128,39 @@
 2025-11-12 11:37:21 - printer_simulation - INFO - [P3] Job ORD-C419CF66 - 50% complete
 2025-11-12 11:38:11 - printer_simulation - INFO - [P3] Job ORD-C419CF66 completed in 100.0s
 2025-11-12 11:38:11 - printer_simulation - INFO - [P3] Now idle
+2025-11-12 12:02:36 - printer_simulation - INFO - Job ORD-5D13B842 submitted to P4
+2025-11-12 12:02:36 - printer_simulation - INFO - [P4] Starting job ORD-5D13B842 - 10 pages, 1 copies, bw
+2025-11-12 12:02:41 - printer_simulation - INFO - [P4] Job ORD-5D13B842 - 50% complete
+2025-11-12 12:02:46 - printer_simulation - INFO - [P4] Job ORD-5D13B842 completed in 10.0s
+2025-11-12 12:02:46 - printer_simulation - INFO - [P4] Now idle
+2025-11-12 12:32:07 - printer_simulation - INFO - Job ORD-6B20F233 submitted to P1
+2025-11-12 12:32:07 - printer_simulation - INFO - [P1] Starting job ORD-6B20F233 - 10 pages, 5 copies, bw
+2025-11-12 12:32:32 - printer_simulation - INFO - [P1] Job ORD-6B20F233 - 50% complete
+2025-11-12 12:32:57 - printer_simulation - INFO - [P1] Job ORD-6B20F233 completed in 50.0s
+2025-11-12 12:32:57 - printer_simulation - INFO - [P1] Now idle
+2025-11-12 12:33:40 - printer_simulation - INFO - Job ORD-948A9338 submitted to P2
+2025-11-12 12:33:40 - printer_simulation - INFO - [P2] Starting job ORD-948A9338 - 10 pages, 1 copies, bw
+2025-11-12 12:33:45 - printer_simulation - INFO - [P2] Job ORD-948A9338 - 50% complete
+2025-11-12 12:33:50 - printer_simulation - INFO - [P2] Job ORD-948A9338 completed in 10.0s
+2025-11-12 12:33:50 - printer_simulation - INFO - [P2] Now idle
+2025-11-12 17:20:53 - printer_simulation - INFO - 🚀 Printer Simulation API started with Webhook support
+2025-11-12 17:21:58 - printer_simulation - INFO - Job ORD-5592B7BC submitted to P1 [webhook: http://localhost:8000/webhook/printer-update]
+2025-11-12 17:21:58 - printer_simulation - INFO - [P1] Starting job ORD-5592B7BC - 10 pages, 1 copies, bw
+2025-11-12 17:21:58 - printer_simulation - INFO - ✅ Webhook sent for ORD-5592B7BC: printing (0%)
+2025-11-12 17:22:03 - printer_simulation - INFO - ✅ Webhook sent for ORD-5592B7BC: printing (50%)
+2025-11-12 17:22:03 - printer_simulation - INFO - [P1] Job ORD-5592B7BC - 50% complete
+2025-11-12 17:22:08 - printer_simulation - INFO - ✅ Webhook sent for ORD-5592B7BC: completed (100%)
+2025-11-12 17:22:08 - printer_simulation - INFO - [P1] Job ORD-5592B7BC completed in 10.0s
+2025-11-12 17:22:08 - printer_simulation - INFO - [P1] Now idle
+2025-11-12 17:23:32 - printer_simulation - INFO - Job ORD-F25084B9 submitted to P2 [webhook: http://localhost:8000/webhook/printer-update]
+2025-11-12 17:23:32 - printer_simulation - INFO - [P2] Starting job ORD-F25084B9 - 10 pages, 1 copies, bw
+2025-11-12 17:23:32 - printer_simulation - INFO - ✅ Webhook sent for ORD-F25084B9: printing (0%)
+2025-11-12 17:23:37 - printer_simulation - INFO - ✅ Webhook sent for ORD-F25084B9: printing (50%)
+2025-11-12 17:23:37 - printer_simulation - INFO - [P2] Job ORD-F25084B9 - 50% complete
+2025-11-12 17:23:42 - printer_simulation - INFO - ✅ Webhook sent for ORD-F25084B9: completed (100%)
+2025-11-12 17:23:42 - printer_simulation - INFO - [P2] Job ORD-F25084B9 completed in 10.0s
+2025-11-12 17:23:42 - printer_simulation - INFO - [P2] Now idle
+2025-11-12 22:17:46 - printer_simulation - INFO - 🚀 Printer Simulation API started with Webhook support
+2025-11-12 23:05:12 - printer_simulation - INFO - 🚀 Printer Simulation API started with Webhook support
+2025-11-12 23:45:58 - printer_simulation - INFO - 🚀 Printer Simulation API started with Webhook support
+2025-11-13 22:16:51 - printer_simulation - INFO - 🚀 Printer Simulation API started with Webhook support

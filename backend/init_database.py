@@ -1,223 +1,163 @@
 """
-Database initialization script
-Creates tables and seeds initial data
-Run: python init_database.py
+Database Initialization Script
+Creates tables and seeds initial data for testing
 """
 
-from database import init_db, get_db_context
-from models import Store, SupervisorData, Printer, RoleEnum, PrinterType, StoreStatusEnum, PrinterStatusEnum
-import logging
+import sys
+from datetime import datetime
+from database import engine, SessionLocal, Base, init_db
+from models import (
+    User, Store, Printer, StoreStatusEnum, PrinterStatusEnum,
+    PrinterType, PrinterConnectionType
+)
+from auth import hash_password, generate_user_id
+from sqlalchemy import text
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-def seed_initial_data():
-    """Seed database with initial stores and printers"""
-    
-    logger.info("Starting database seeding...")
-    
-    with get_db_context() as db:
-        # Check if data already exists
-        existing_stores = db.query(Store).count()
-        if existing_stores > 0:
-            logger.info("Database already has data. Skipping seed.")
-            return
-        
-        # Create stores
-        stores_data = [
-            {
-                "store_id": "STORE001",
-                "store_name": "Campus Print Shop A",
-                "address": "Building A, Main Campus",
-                "contact_number": "+91-9876543210",
-                "email": "storeA@campus.edu",
-                "business_hours": {"open": "08:00", "close": "20:00"},
-                "pricing_info": {
-                    "bw_per_page": 2.0,
-                    "color_per_page": 10.0,
-                    "discounts": {"bulk": 0.1}
-                },
-                "payment_modes": ["cash", "upi", "card"],
-                "status": StoreStatusEnum.OPEN
-            },
-            {
-                "store_id": "STORE002",
-                "store_name": "Campus Print Shop B",
-                "address": "Building B, Main Campus",
-                "contact_number": "+91-9876543211",
-                "email": "storeB@campus.edu",
-                "business_hours": {"open": "09:00", "close": "21:00"},
-                "pricing_info": {
-                    "bw_per_page": 2.0,
-                    "color_per_page": 10.0
-                },
-                "payment_modes": ["cash", "upi"],
-                "status": StoreStatusEnum.OPEN
-            }
-        ]
-        
-        for store_data in stores_data:
-            store = Store(**store_data)
-            db.add(store)
-            logger.info(f"Created store: {store.store_id}")
-        
-        # Create printers
-        printers_data = [
-            {
-                "printer_id": "P1",
-                "store_id": "STORE001",
-                "printer_name": "BW Printer 1",
-                "printer_model": "HP LaserJet Pro M404n",
-                "type": PrinterType.LASER,
-                "supported_sizes": ["A4", "Legal"],
-                "color_support": False,
-                "duplex_support": True,
-                "status": PrinterStatusEnum.ONLINE,
-                "paper_capacity": 500,
-                "paper_available": 500,
-                "ink_toner_level": {"black": 85}
-            },
-            {
-                "printer_id": "P2",
-                "store_id": "STORE001",
-                "printer_name": "BW Printer 2",
-                "printer_model": "Canon LBP2900B",
-                "type": PrinterType.LASER,
-                "supported_sizes": ["A4"],
-                "color_support": False,
-                "duplex_support": False,
-                "status": PrinterStatusEnum.ONLINE,
-                "paper_capacity": 250,
-                "paper_available": 250,
-                "ink_toner_level": {"black": 70}
-            },
-            {
-                "printer_id": "P3",
-                "store_id": "STORE002",
-                "printer_name": "BW Printer 3",
-                "printer_model": "Brother HL-L2321D",
-                "type": PrinterType.LASER,
-                "supported_sizes": ["A4", "Legal"],
-                "color_support": False,
-                "duplex_support": True,
-                "status": PrinterStatusEnum.ONLINE,
-                "paper_capacity": 500,
-                "paper_available": 450,
-                "ink_toner_level": {"black": 60}
-            },
-            {
-                "printer_id": "P4",
-                "store_id": "STORE002",
-                "printer_name": "BW Printer 4",
-                "printer_model": "HP LaserJet M111w",
-                "type": PrinterType.LASER,
-                "supported_sizes": ["A4"],
-                "color_support": False,
-                "duplex_support": False,
-                "status": PrinterStatusEnum.ONLINE,
-                "paper_capacity": 150,
-                "paper_available": 150,
-                "ink_toner_level": {"black": 90}
-            },
-            {
-                "printer_id": "P5",
-                "store_id": "STORE001",
-                "printer_name": "Color Printer 1",
-                "printer_model": "Epson L3250",
-                "type": PrinterType.INKJET,
-                "supported_sizes": ["A4", "A3"],
-                "color_support": True,
-                "duplex_support": False,
-                "status": PrinterStatusEnum.ONLINE,
-                "paper_capacity": 100,
-                "paper_available": 100,
-                "ink_toner_level": {
-                    "black": 75,
-                    "cyan": 60,
-                    "magenta": 65,
-                    "yellow": 70
-                }
-            },
-            {
-                "printer_id": "P6",
-                "store_id": "STORE002",
-                "printer_name": "Color Printer 2",
-                "printer_model": "Canon PIXMA G3000",
-                "type": PrinterType.INKJET,
-                "supported_sizes": ["A4"],
-                "color_support": True,
-                "duplex_support": False,
-                "status": PrinterStatusEnum.ONLINE,
-                "paper_capacity": 100,
-                "paper_available": 85,
-                "ink_toner_level": {
-                    "black": 80,
-                    "cyan": 75,
-                    "magenta": 70,
-                    "yellow": 65
-                }
-            }
-        ]
-        
-        for printer_data in printers_data:
-            printer = Printer(**printer_data)
-            db.add(printer)
-            logger.info(f"Created printer: {printer.printer_id}")
-        
-        # Create supervisors
-        supervisors_data = [
-            {
-                "admin_id": "ADMIN001",
-                "store_id": "STORE001",
-                "username": "admin_store_a",
-                "password": "hashed_password_here",  # In production, use proper hashing
-                "role": RoleEnum.OWNER,
-                "address": "Campus Residence A",
-                "contact_number": "+91-9876543220",
-                "email": "admin.a@campus.edu",
-                "available": True,
-                "permissions": {
-                    "can_manage_printers": True,
-                    "can_view_reports": True,
-                    "can_manage_orders": True
-                }
-            },
-            {
-                "admin_id": "ADMIN002",
-                "store_id": "STORE002",
-                "username": "admin_store_b",
-                "password": "hashed_password_here",
-                "role": RoleEnum.SUPERVISOR,
-                "address": "Campus Residence B",
-                "contact_number": "+91-9876543221",
-                "email": "admin.b@campus.edu",
-                "available": True,
-                "permissions": {
-                    "can_manage_printers": True,
-                    "can_view_reports": True
-                }
-            }
-        ]
-        
-        for supervisor_data in supervisors_data:
-            supervisor = SupervisorData(**supervisor_data)
-            db.add(supervisor)
-            logger.info(f"Created supervisor: {supervisor.username}")
-        
-        db.commit()
-        logger.info("✓ Database seeded successfully!")
-
-if __name__ == "__main__":
+def create_tables():
+    """Create all database tables"""
+    print("📊 Creating database tables...")
     try:
-        # Initialize database (create tables)
-        logger.info("Initializing database...")
-        init_db()
+        Base.metadata.create_all(bind=engine)
+        print("✅ Tables created successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to create tables: {e}")
+        return False
+
+def seed_test_data():
+    """Seed database with test data"""
+    print("\n🌱 Seeding test data...")
+    
+    db = SessionLocal()
+    
+    try:
+        # Check if data already exists
+        existing_store = db.query(Store).filter(Store.store_id == "STORE001").first()
+        if existing_store:
+            print("⚠️  Test data already exists. Skipping...")
+            return True
         
-        # Seed initial data
-        seed_initial_data()
+        # Create test store
+        store = Store(
+            store_id="STORE001",
+            store_name="Main Print Shop",
+            address="123 Main Street, City, State 12345",
+            contact_number="+1234567890",
+            email="store@printshop.com",
+            business_hours={"open": "09:00", "close": "21:00", "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]},
+            pricing_info={"bw_per_page": 2.0, "color_per_page": 10.0},
+            payment_modes=["cash", "upi", "card", "razorpay"],
+            status=StoreStatusEnum.OPEN
+        )
+        db.add(store)
+        db.commit()
+        print("✅ Store created: STORE001")
         
-        logger.info("✓ Database initialization complete!")
+        # Create test user
+        test_user = User(
+            user_id=generate_user_id(),
+            email="test@example.com",
+            username="testuser",
+            password_hash=hash_password("password123"),
+            full_name="Test User",
+            phone="+1234567890",
+            balance=1000.0,
+            is_active=True,
+            is_verified=True
+        )
+        db.add(test_user)
+        db.commit()
+        print(f"✅ Test user created: testuser (password: password123)")
+        
+        # Note: Printers will be synced from simulator on backend startup
+        print("ℹ️  Printers will be synced from simulator on first backend startup")
+        
+        print("✅ Test data seeded successfully")
+        return True
         
     except Exception as e:
-        logger.error(f"✗ Database initialization failed: {e}")
-        raise
+        print(f"❌ Failed to seed data: {e}")
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+def check_database_connection():
+    """Verify database connection"""
+    print("🔍 Checking database connection...")
+    try:
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+
+        db.close()
+        print("✅ Database connection successful")
+        return True
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
+        print("ℹ️  Make sure PostgreSQL is running and DATABASE_URL in .env is correct")
+        return False
+
+def reset_database():
+    """Drop all tables (USE WITH CAUTION)"""
+    print("⚠️  WARNING: This will delete ALL data!")
+    confirmation = input("Type 'DELETE ALL DATA' to confirm: ")
+    
+    if confirmation == "DELETE ALL DATA":
+        print("🗑️  Dropping all tables...")
+        try:
+            Base.metadata.drop_all(bind=engine)
+            print("✅ All tables dropped")
+            return True
+        except Exception as e:
+            print(f"❌ Failed to drop tables: {e}")
+            return False
+    else:
+        print("❌ Confirmation failed. Aborting.")
+        return False
+
+def main():
+    """Main initialization flow"""
+    print("=" * 60)
+    print("  Database Initialization")
+    print("=" * 60)
+    print()
+    
+    # Check for --reset flag
+    if len(sys.argv) > 1 and sys.argv[1] == "--reset":
+        if not reset_database():
+            sys.exit(1)
+        print()
+    
+    # Check connection
+    if not check_database_connection():
+        sys.exit(1)
+    
+    print()
+    
+    # Create tables
+    if not create_tables():
+        sys.exit(1)
+    
+    print()
+    
+    # Seed data
+    if not seed_test_data():
+        sys.exit(1)
+    
+    print()
+    print("=" * 60)
+    print("  ✨ Database initialization complete!")
+    print("=" * 60)
+    print()
+    print("Test Credentials:")
+    print("  Username: testuser")
+    print("  Password: password123")
+    print()
+    print("Next steps:")
+    print("  1. Start services: ./quick_start.sh")
+    print("  2. Run tests: python3 test_integration.py")
+    print("  3. Access API docs: http://localhost:8000/docs")
+    print()
+
+if __name__ == "__main__":
+    main()
