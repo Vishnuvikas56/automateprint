@@ -1103,245 +1103,245 @@ def order_combinations(order_type_supported: list, printers_data: dict):
 # EXAMPLE USAGE & TESTING
 # ============================================================================
 
-if __name__ == "__main__":
-    # Configure logging
-    logging.basicConfig(level=logging.INFO)
+# if __name__ == "__main__":
+#     # Configure logging
+#     logging.basicConfig(level=logging.INFO)
     
-    print("=" * 70)
-    print("PRODUCTION-GRADE PRINTER SCHEDULER - DEMONSTRATION")
-    print("=" * 70)
+#     print("=" * 70)
+#     print("PRODUCTION-GRADE PRINTER SCHEDULER - DEMONSTRATION")
+#     print("=" * 70)
     
-    # Sample printer fleet
-    printers_data = {
-        "P1": {
-            "supported": ["bw", "color"],
-            "paper_count": {"A4": 180, "A3": 50},
-            "ink": {"black": 70, "C": 60, "M": 55, "Y": 50},
-            "speed": 35,
-            "queue": None  # Will be initialized
-        },
-        "P2": {
-            "supported": ["bw", "thick"],
-            "paper_count": {"A4": 90, "Thick": 40},
-            "ink": {"black": 80},
-            "speed": 25,
-            "queue": None
-        },
-        "P3": {
-            "supported": ["color", "glossy"],
-            "paper_count": {"Glossy": 30, "A4": 70},
-            "ink": {"black": 50, "C": 45, "M": 46, "Y": 42},
-            "speed": 20,
-            "queue": None
-        },
-        "P4": {
-            "supported": ["postersize"],
-            "paper_count": {"Poster": 15},
-            "ink": {"black": 40, "C": 30, "M": 32, "Y": 28},
-            "speed": 15,
-            "queue": None
-        },
-        "P5": {
-            "supported": ["bw", "color", "glossy"],
-            "paper_count": {"A4": 200, "Glossy": 60},
-            "ink": {"black": 85, "C": 80, "M": 79, "Y": 78},
-            "speed": 50,
-            "queue": None
-        },
-        "P6": {
-            "supported": ["bw", "color", "thick", "glossy", "postersize"],
-            "paper_count": {"A4": 300, "Thick": 80, "Glossy": 100, "Poster": 40},
-            "ink": {"black": 95, "C": 92, "M": 93, "Y": 94},
-            "speed": 65,
-            "queue": None
-        }
-    }
+#     # Sample printer fleet
+#     printers_data = {
+#         "P1": {
+#             "supported": ["bw", "color"],
+#             "paper_count": {"A4": 180, "A3": 50},
+#             "ink": {"black": 70, "C": 60, "M": 55, "Y": 50},
+#             "speed": 35,
+#             "queue": None  # Will be initialized
+#         },
+#         "P2": {
+#             "supported": ["bw", "thick"],
+#             "paper_count": {"A4": 90, "Thick": 40},
+#             "ink": {"black": 80},
+#             "speed": 25,
+#             "queue": None
+#         },
+#         "P3": {
+#             "supported": ["color", "glossy"],
+#             "paper_count": {"Glossy": 30, "A4": 70},
+#             "ink": {"black": 50, "C": 45, "M": 46, "Y": 42},
+#             "speed": 20,
+#             "queue": None
+#         },
+#         "P4": {
+#             "supported": ["postersize"],
+#             "paper_count": {"Poster": 15},
+#             "ink": {"black": 40, "C": 30, "M": 32, "Y": 28},
+#             "speed": 15,
+#             "queue": None
+#         },
+#         "P5": {
+#             "supported": ["bw", "color", "glossy"],
+#             "paper_count": {"A4": 200, "Glossy": 60},
+#             "ink": {"black": 85, "C": 80, "M": 79, "Y": 78},
+#             "speed": 50,
+#             "queue": None
+#         },
+#         "P6": {
+#             "supported": ["bw", "color", "thick", "glossy", "postersize"],
+#             "paper_count": {"A4": 300, "Thick": 80, "Glossy": 100, "Poster": 40},
+#             "ink": {"black": 95, "C": 92, "M": 93, "Y": 94},
+#             "speed": 65,
+#             "queue": None
+#         }
+#     }
     
-    # Initialize scheduler
-    print("\n[1] Initializing scheduler...")
-    scheduler = PrinterScheduler(printers_data)
-    print("✓ Scheduler initialized with 6 printers")
+#     # Initialize scheduler
+#     print("\n[1] Initializing scheduler...")
+#     scheduler = PrinterScheduler(printers_data)
+#     print("✓ Scheduler initialized with 6 printers")
     
-    # Generate priority map
-    print("\n[2] Generating priority combinations...")
-    priority_map = order_combinations(
-        ["bw", "color", "thick", "glossy", "postersize"], 
-        printers_data
-    )
-    print(f"✓ Generated {len(priority_map)} priority combinations")
+#     # Generate priority map
+#     print("\n[2] Generating priority combinations...")
+#     priority_map = order_combinations(
+#         ["bw", "color", "thick", "glossy", "postersize"], 
+#         printers_data
+#     )
+#     print(f"✓ Generated {len(priority_map)} priority combinations")
     
-    # Test Case 1: Complex order
-    print("\n" + "=" * 70)
-    print("TEST CASE 1: Complex Multi-Type Order")
-    print("=" * 70)
+#     # Test Case 1: Complex order
+#     print("\n" + "=" * 70)
+#     print("TEST CASE 1: Complex Multi-Type Order")
+#     print("=" * 70)
     
-    order1 = {
-        "bw": {"paper_count": {"A4": 50}},
-        "color": {"paper_count": {"A4": 20}},
-        "glossy": {"paper_count": {"Glossy": 10}},
-        "postersize": {"paper_count": {"Poster": 2}}
-    }
+#     order1 = {
+#         "bw": {"paper_count": {"A4": 50}},
+#         "color": {"paper_count": {"A4": 20}},
+#         "glossy": {"paper_count": {"Glossy": 10}},
+#         "postersize": {"paper_count": {"Poster": 2}}
+#     }
     
-    print("\nOrder Requirements:")
-    for otype, req in order1.items():
-        print(f"  - {otype}: {req['paper_count']}")
+#     print("\nOrder Requirements:")
+#     for otype, req in order1.items():
+#         print(f"  - {otype}: {req['paper_count']}")
     
-    result1 = scheduler.schedule_order(
-        order1, 
-        order_id="ORDER-001",
-        priority=5,
-        default_priorities_map=priority_map
-    )
+#     result1 = scheduler.schedule_order(
+#         order1, 
+#         order_id="ORDER-001",
+#         priority=5,
+#         default_priorities_map=priority_map
+#     )
     
-    print("\n✓ Order scheduled successfully!")
-    print(f"\nAssignments:")
-    for i, (printer, score, suborder) in enumerate(
-        zip(result1['assignments'], result1['scores'], result1['suborders']), 1
-    ):
-        print(f"  Suborder {i}: {', '.join(suborder)} → {printer} (score: {score:.3f})")
+#     print("\n✓ Order scheduled successfully!")
+#     print(f"\nAssignments:")
+#     for i, (printer, score, suborder) in enumerate(
+#         zip(result1['assignments'], result1['scores'], result1['suborders']), 1
+#     ):
+#         print(f"  Suborder {i}: {', '.join(suborder)} → {printer} (score: {score:.3f})")
     
-    # Test Case 2: Simple order (should use cache after first run)
-    print("\n" + "=" * 70)
-    print("TEST CASE 2: Simple Order + Cache Test")
-    print("=" * 70)
+#     # Test Case 2: Simple order (should use cache after first run)
+#     print("\n" + "=" * 70)
+#     print("TEST CASE 2: Simple Order + Cache Test")
+#     print("=" * 70)
     
-    order2 = {
-        "bw": {"paper_count": {"A4": 10}},
-        "color": {"paper_count": {"A4": 5}}
-    }
+#     order2 = {
+#         "bw": {"paper_count": {"A4": 10}},
+#         "color": {"paper_count": {"A4": 5}}
+#     }
     
-    print("\nFirst scheduling (no cache)...")
-    start = time.time()
-    result2 = scheduler.schedule_order(
-        order2,
-        order_id="ORDER-002", 
-        default_priorities_map=priority_map
-    )
-    time1 = time.time() - start
+#     print("\nFirst scheduling (no cache)...")
+#     start = time.time()
+#     result2 = scheduler.schedule_order(
+#         order2,
+#         order_id="ORDER-002", 
+#         default_priorities_map=priority_map
+#     )
+#     time1 = time.time() - start
     
-    print(f"✓ Scheduled to: {result2['assignments'][0]} in {time1*1000:.2f}ms")
+#     print(f"✓ Scheduled to: {result2['assignments'][0]} in {time1*1000:.2f}ms")
     
-    # Check printer status
-    print("\n" + "=" * 70)
-    print("PRINTER STATUS CHECK")
-    print("=" * 70)
+#     # Check printer status
+#     print("\n" + "=" * 70)
+#     print("PRINTER STATUS CHECK")
+#     print("=" * 70)
     
-    for printer_id in ["P1", "P5", "P6"]:
-        status = scheduler.get_printer_status(printer_id)
-        print(f"\n{printer_id}:")
-        print(f"  Status: {status['status']}")
-        print(f"  Queue Size: {status['queue_size']}")
-        print(f"  Paper: {status['paper_count']}")
-        print(f"  Ink: {', '.join(f'{k}:{v:.1f}%' for k, v in status['ink'].items())}")
+#     for printer_id in ["P1", "P5", "P6"]:
+#         status = scheduler.get_printer_status(printer_id)
+#         print(f"\n{printer_id}:")
+#         print(f"  Status: {status['status']}")
+#         print(f"  Queue Size: {status['queue_size']}")
+#         print(f"  Paper: {status['paper_count']}")
+#         print(f"  Ink: {', '.join(f'{k}:{v:.1f}%' for k, v in status['ink'].items())}")
     
-    # System status
-    print("\n" + "=" * 70)
-    print("SYSTEM STATUS")
-    print("=" * 70)
+#     # System status
+#     print("\n" + "=" * 70)
+#     print("SYSTEM STATUS")
+#     print("=" * 70)
     
-    system_status = scheduler.get_system_status()
-    print(f"\nTotal Printers: {system_status['total_printers']}")
-    print(f"Ready Printers: {system_status['ready_printers']}")
-    print(f"Queued Jobs: {system_status['total_queued_jobs']}")
-    print(f"Cache Entries: {system_status['cache_size']}")
+#     system_status = scheduler.get_system_status()
+#     print(f"\nTotal Printers: {system_status['total_printers']}")
+#     print(f"Ready Printers: {system_status['ready_printers']}")
+#     print(f"Queued Jobs: {system_status['total_queued_jobs']}")
+#     print(f"Cache Entries: {system_status['cache_size']}")
     
-    # Test Case 3: Resource refill
-    print("\n" + "=" * 70)
-    print("TEST CASE 3: Resource Management")
-    print("=" * 70)
+#     # Test Case 3: Resource refill
+#     print("\n" + "=" * 70)
+#     print("TEST CASE 3: Resource Management")
+#     print("=" * 70)
     
-    print("\nRefilling P1 resources...")
-    scheduler.update_printer_resources(
-        "P1",
-        paper_count={"A4": 200, "A3": 100},
-        ink={"black": 100, "C": 100, "M": 100, "Y": 100}
-    )
-    print("✓ Resources updated")
+#     print("\nRefilling P1 resources...")
+#     scheduler.update_printer_resources(
+#         "P1",
+#         paper_count={"A4": 200, "A3": 100},
+#         ink={"black": 100, "C": 100, "M": 100, "Y": 100}
+#     )
+#     print("✓ Resources updated")
     
-    updated_status = scheduler.get_printer_status("P1")
-    print(f"\nP1 Updated Status:")
-    print(f"  Paper A4: {updated_status['paper_count']['A4']}")
-    print(f"  Black Ink: {updated_status['ink']['black']:.1f}%")
+#     updated_status = scheduler.get_printer_status("P1")
+#     print(f"\nP1 Updated Status:")
+#     print(f"  Paper A4: {updated_status['paper_count']['A4']}")
+#     print(f"  Black Ink: {updated_status['ink']['black']:.1f}%")
     
-    # Test Case 4: Error handling
-    print("\n" + "=" * 70)
-    print("TEST CASE 4: Error Handling")
-    print("=" * 70)
+#     # Test Case 4: Error handling
+#     print("\n" + "=" * 70)
+#     print("TEST CASE 4: Error Handling")
+#     print("=" * 70)
     
-    # Test 4a: Insufficient resources
-    try:
-        print("\n[4a] Attempting order with insufficient resources (10,000 pages)...")
-        impossible_order = {
-            "bw": {"paper_count": {"A4": 10000}}  # Too many pages
-        }
-        scheduler.schedule_order(impossible_order, order_id="ORDER-FAIL")
-        print("✗ Should have thrown error!")
-    except InsufficientResourceError as e:
-        print(f"✓ Correctly caught InsufficientResourceError:")
-        print(f"  {e}")
-    except Exception as e:
-        print(f"✗ Wrong exception type: {type(e).__name__}: {e}")
+#     # Test 4a: Insufficient resources
+#     try:
+#         print("\n[4a] Attempting order with insufficient resources (10,000 pages)...")
+#         impossible_order = {
+#             "bw": {"paper_count": {"A4": 10000}}  # Too many pages
+#         }
+#         scheduler.schedule_order(impossible_order, order_id="ORDER-FAIL")
+#         print("✗ Should have thrown error!")
+#     except InsufficientResourceError as e:
+#         print(f"✓ Correctly caught InsufficientResourceError:")
+#         print(f"  {e}")
+#     except Exception as e:
+#         print(f"✗ Wrong exception type: {type(e).__name__}: {e}")
     
-    # Test 4b: Unsupported order type
-    try:
-        print("\n[4b] Attempting order with unsupported type...")
-        invalid_order = {
-            "holographic": {"paper_count": {"Holo": 5}}  # Unsupported type
-        }
-        scheduler.schedule_order(invalid_order, order_id="ORDER-INVALID")
-        print("✗ Should have thrown error!")
-    except NoCapablePrinterError as e:
-        print(f"✓ Correctly caught NoCapablePrinterError:")
-        print(f"  {e}")
-    except Exception as e:
-        print(f"✗ Wrong exception type: {type(e).__name__}: {e}")
+#     # Test 4b: Unsupported order type
+#     try:
+#         print("\n[4b] Attempting order with unsupported type...")
+#         invalid_order = {
+#             "holographic": {"paper_count": {"Holo": 5}}  # Unsupported type
+#         }
+#         scheduler.schedule_order(invalid_order, order_id="ORDER-INVALID")
+#         print("✗ Should have thrown error!")
+#     except NoCapablePrinterError as e:
+#         print(f"✓ Correctly caught NoCapablePrinterError:")
+#         print(f"  {e}")
+#     except Exception as e:
+#         print(f"✗ Wrong exception type: {type(e).__name__}: {e}")
     
-    # Test 4c: Invalid input validation
-    try:
-        print("\n[4c] Attempting order with invalid paper count...")
-        invalid_count_order = {
-            "bw": {"paper_count": {"A4": -5}}  # Negative count
-        }
-        scheduler.schedule_order(invalid_count_order, order_id="ORDER-NEGATIVE")
-        print("✗ Should have thrown error!")
-    except ValidationError as e:
-        print(f"✓ Correctly caught ValidationError:")
-        print(f"  {e}")
-    except Exception as e:
-        print(f"✗ Wrong exception type: {type(e).__name__}: {e}")
+#     # Test 4c: Invalid input validation
+#     try:
+#         print("\n[4c] Attempting order with invalid paper count...")
+#         invalid_count_order = {
+#             "bw": {"paper_count": {"A4": -5}}  # Negative count
+#         }
+#         scheduler.schedule_order(invalid_count_order, order_id="ORDER-NEGATIVE")
+#         print("✗ Should have thrown error!")
+#     except ValidationError as e:
+#         print(f"✓ Correctly caught ValidationError:")
+#         print(f"  {e}")
+#     except Exception as e:
+#         print(f"✗ Wrong exception type: {type(e).__name__}: {e}")
     
-    # Test 4d: Empty order
-    try:
-        print("\n[4d] Attempting empty order...")
-        empty_order = {}
-        scheduler.schedule_order(empty_order, order_id="ORDER-EMPTY")
-        print("✗ Should have thrown error!")
-    except ValidationError as e:
-        print(f"✓ Correctly caught ValidationError:")
-        print(f"  {e}")
-    except Exception as e:
-        print(f"✗ Wrong exception type: {type(e).__name__}: {e}")
+#     # Test 4d: Empty order
+#     try:
+#         print("\n[4d] Attempting empty order...")
+#         empty_order = {}
+#         scheduler.schedule_order(empty_order, order_id="ORDER-EMPTY")
+#         print("✗ Should have thrown error!")
+#     except ValidationError as e:
+#         print(f"✓ Correctly caught ValidationError:")
+#         print(f"  {e}")
+#     except Exception as e:
+#         print(f"✗ Wrong exception type: {type(e).__name__}: {e}")
     
-    # Performance summary
-    print("\n" + "=" * 70)
-    print("PRODUCTION FEATURES DEMONSTRATED")
-    print("=" * 70)
-    print("""
-        ✓ Input Validation - All orders and printers validated
-        ✓ Resource Management - Atomic resource consumption with versioning
-        ✓ Concurrency Control - Thread-safe locking mechanisms
-        ✓ Error Handling - Comprehensive exception hierarchy
-        ✓ Retry Logic - Automatic retry on resource conflicts
-        ✓ Caching - Fast repeated queries with TTL
-        ✓ Priority Queues - Job prioritization support
-        ✓ Cost Optimization - Cost factor in scoring algorithm
-        ✓ Performance Optimization - Indexed printer capabilities
-        ✓ Logging & Monitoring - Structured event logging
-        ✓ Status Tracking - Real-time printer and system status
-        ✓ Resource Updates - Support for refills and maintenance
-        ✓ Order Cancellation - Cancel pending orders
-    """)
+#     # Performance summary
+#     print("\n" + "=" * 70)
+#     print("PRODUCTION FEATURES DEMONSTRATED")
+#     print("=" * 70)
+#     print("""
+#         ✓ Input Validation - All orders and printers validated
+#         ✓ Resource Management - Atomic resource consumption with versioning
+#         ✓ Concurrency Control - Thread-safe locking mechanisms
+#         ✓ Error Handling - Comprehensive exception hierarchy
+#         ✓ Retry Logic - Automatic retry on resource conflicts
+#         ✓ Caching - Fast repeated queries with TTL
+#         ✓ Priority Queues - Job prioritization support
+#         ✓ Cost Optimization - Cost factor in scoring algorithm
+#         ✓ Performance Optimization - Indexed printer capabilities
+#         ✓ Logging & Monitoring - Structured event logging
+#         ✓ Status Tracking - Real-time printer and system status
+#         ✓ Resource Updates - Support for refills and maintenance
+#         ✓ Order Cancellation - Cancel pending orders
+#     """)
     
-    print("\n" + "=" * 70)
-    print("SCHEDULER READY FOR PRODUCTION USE")
-    print("=" * 70)
+#     print("\n" + "=" * 70)
+#     print("SCHEDULER READY FOR PRODUCTION USE")
+#     print("=" * 70)

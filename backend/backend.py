@@ -8,9 +8,10 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, validator
 from storage import upload_pdf_to_gcs
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+from routes.supervisorbackend import router as supervisor_router
 import httpx
 import uuid
 import logging
@@ -71,62 +72,138 @@ logger.addHandler(console_handler)
 
 # ==================== SSE Event Management ====================
 
+# ==================== Enhanced SSE Event Management ====================
+
 class SSEManager:
-    """Manages Server-Sent Events for real-time updates"""
+    """Enhanced SSE Manager with connection tracking and heartbeat"""
     
     def __init__(self):
         self.connections: Dict[str, List[asyncio.Queue]] = defaultdict(list)
+        self.connection_info: Dict[str, Dict] = defaultdict(dict)
         self.lock = asyncio.Lock()
     
-    async def connect(self, user_id: str) -> asyncio.Queue:
-        queue = asyncio.Queue()
+    async def connect(self, user_id: str, client_info: Dict = None) -> asyncio.Queue:
+        """Connect a new client with tracking"""
+        queue = asyncio.Queue(maxsize=100)  # Prevent memory overflow
+        
         async with self.lock:
             self.connections[user_id].append(queue)
-        logger.info(f"✅ SSE connected: {user_id}")
+            self.connection_info[user_id][id(queue)] = {
+                "connected_at": datetime.now(),
+                "client_info": client_info or {},
+                "last_activity": datetime.now()
+            }
+        
+        logger.info(f"✅ SSE connected: {user_id} (connections: {len(self.connections[user_id])})")
         return queue
     
     async def disconnect(self, user_id: str, queue: asyncio.Queue):
+        """Disconnect a client and clean up"""
         async with self.lock:
             if user_id in self.connections:
                 if queue in self.connections[user_id]:
                     self.connections[user_id].remove(queue)
+                    # Remove connection info
+                    if id(queue) in self.connection_info[user_id]:
+                        del self.connection_info[user_id][id(queue)]
+                
                 if not self.connections[user_id]:
                     del self.connections[user_id]
+                    if user_id in self.connection_info:
+                        del self.connection_info[user_id]
+        
         logger.info(f"❌ SSE disconnected: {user_id}")
     
     async def send_update(self, user_id: str, event_type: str, data: dict):
+        """Send update to specific user"""
         async with self.lock:
             if user_id not in self.connections:
                 return
             queues = self.connections[user_id].copy()
+            connection_ids = list(self.connection_info[user_id].keys())
         
         message = {
             "event": event_type,
             "data": data,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "id": str(uuid.uuid4())  # Unique ID for each message
         }
         
-        for queue in queues:
+        successful_sends = 0
+        for queue, conn_id in zip(queues, connection_ids):
             try:
-                await queue.put(message)
+                # Update last activity
+                async with self.lock:
+                    if user_id in self.connection_info and conn_id in self.connection_info[user_id]:
+                        self.connection_info[user_id][conn_id]["last_activity"] = datetime.now()
+                
+                # Non-blocking put with timeout
+                await asyncio.wait_for(queue.put(message), timeout=1.0)
+                successful_sends += 1
+            except asyncio.TimeoutError:
+                logger.warning(f"SSE queue full for {user_id}, dropping message")
             except Exception as e:
                 logger.error(f"SSE send failed for {user_id}: {e}")
+                # Mark for cleanup
+                async with self.lock:
+                    if user_id in self.connections and queue in self.connections[user_id]:
+                        self.connections[user_id].remove(queue)
+        
+        if successful_sends > 0:
+            logger.debug(f"📤 SSE sent {event_type} to {successful_sends} client(s) for {user_id}")
+    
+    async def broadcast(self, event_type: str, data: dict, exclude_users: List[str] = None):
+        """Broadcast to all connected users"""
+        exclude_users = exclude_users or []
+        
+        async with self.lock:
+            all_users = list(self.connections.keys())
+        
+        tasks = []
+        for user_id in all_users:
+            if user_id not in exclude_users:
+                tasks.append(self.send_update(user_id, event_type, data))
+        
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.debug(f"📢 Broadcast {event_type} to {len(tasks)} users")
+    
+    async def get_connection_stats(self) -> Dict:
+        """Get connection statistics"""
+        async with self.lock:
+            total_connections = sum(len(queues) for queues in self.connections.values())
+            unique_users = len(self.connections)
+            
+            return {
+                "total_connections": total_connections,
+                "unique_users": unique_users,
+                "users": {
+                    user_id: {
+                        "connection_count": len(queues),
+                        "connections": list(conn_info.values())
+                    }
+                    for user_id, conn_info in self.connection_info.items()
+                }
+            }
 
 sse_manager = SSEManager()
 
 # ==================== Request/Response Models ====================
 
 class PrintJobRequest(BaseModel):
-    """Request to create a print job"""
-    pages: int = Field(gt=0, le=10000)
+    """New request format with mixed order support"""
+    pages: Dict[str, Dict[str, Any]] = Field(..., description="Dictionary with print types as keys and page config as values")
+    print_type: Dict[str, str] = Field(..., description="Dictionary with print types as keys and paper types as values")
+    paper_type: Dict[str, str] = Field(..., description="Alias for print_type for compatibility")
+    mixed: bool = Field(..., description="Whether this is a mixed order")
     copies: int = Field(default=1, gt=0, le=100)
-    print_type: str = Field(..., pattern="^(bw|color|thick|glossy|postersize)$")
-    paper_type: str = Field(default="A4", pattern="^(A4|A3|Letter|Legal|Thick|Glossy|Poster)$")
     priority: int = Field(default=5, ge=1, le=10)
     duplex: bool = Field(default=False)
     collate: bool = Field(default=True)
     store_id: str = Field(default="STORE001")
     file_url: Optional[str] = None
+    extras: Optional[Dict[str, Any]] = Field(default=None, description="Additional options like binding")
+    total_page_count: int = Field(..., gt=0, le=10000)  # ← ADD THIS LINE
 
 class CreatePaymentRequest(BaseModel):
     """Unified request for single or bulk orders"""
@@ -172,6 +249,11 @@ class StoreCreate(BaseModel):
     pricing_info: Optional[dict]
     payment_modes: Optional[list]
 
+AlertStatus = {
+    "UNREAD": "Unread",
+    "ACKNOWLEDGED": "Acknowledged",
+    "RESOLVED": "Resolved"
+}
 # ==================== Global State ====================
 
 scheduler: Optional[PrinterScheduler] = None
@@ -258,6 +340,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(supervisor_router)
+
 # ==================== Helper Functions ====================
 
 def get_current_user(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)) -> User:
@@ -279,49 +363,69 @@ def get_current_user(authorization: Optional[str] = Header(None), db: Session = 
     return user
 
 # Update the calculate_price function in backend.py
-def calculate_price(pages: int, copies: int, print_type: str, store_id: str, db: Session) -> float:
-    """Calculate job price based on store pricing"""
-    try:
-        # Use a fresh query to avoid transaction issues
-        store = db.query(Store).filter(Store.store_id == store_id).first()
+def calculate_price_from_config(
+    pages_config: Dict[str, Dict[str, Any]], 
+    print_types: Dict[str, str],
+    copies: int,
+    store_id: str,
+    extras: Optional[Dict[str, Any]],
+    total_pdf_pages: int,
+    db: Session
+) -> float:
+    """
+    Calculate price based on new configuration format
+    """
+    total_price = 0.0
+    
+    # Get store pricing
+    store = db.query(Store).filter(Store.store_id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    
+    store_prices = store.pricing_info or {}
+    
+    # Default prices if store doesn't have them
+    default_prices = {
+        'bw_per_page': 2,
+        'color_per_page': 10,
+        'glossy_per_page': 15,
+        'thick_per_page': 15,
+        'poster_per_page': 20,
+        'binding': 10
+    }
+    
+    prices = {**default_prices, **store_prices}
+    
+    # Calculate printing cost
+    for print_type, config in pages_config.items():
+        page_str = config.get('pages', '')
+        exclude = config.get('exclude', False)
         
-        if store and store.pricing_info:
-            pricing = store.pricing_info
-            price_map = {
-                'bw': pricing.get('bw_per_page', 2.0),
-                'color': pricing.get('color_per_page', 10.0),
-                'thick': pricing.get('thick_per_page', 15.0),
-                'glossy': pricing.get('glossy_per_page', 15.0),
-                'postersize': pricing.get('poster_per_page', 50.0)
-            }
+        # Get pages to print for this type
+        if not page_str.strip():
+            pages_to_print = list(range(1, total_pdf_pages + 1))
         else:
-            # Fallback pricing
-            price_map = {
-                'bw': 2.0,
-                'color': 10.0,
-                'thick': 15.0,
-                'glossy': 15.0,
-                'postersize': 50.0
-            }
+            pages_to_print = parse_page_string(page_str, total_pdf_pages)
         
-        total_pages = pages * copies
-        price_per_page = price_map.get(print_type, 5.0)
+        if exclude:
+            all_pages = set(range(1, total_pdf_pages + 1))
+            specified_pages = set(pages_to_print)
+            pages_to_print = list(all_pages - specified_pages)
         
-        return round(total_pages * price_per_page, 2)
+        page_count = len(pages_to_print)
         
-    except Exception as e:
-        logger.error(f"Error calculating price: {e}")
-        # Emergency fallback pricing
-        price_map = {
-            'bw': 2.0,
-            'color': 10.0,
-            'thick': 15.0,
-            'glossy': 15.0,
-            'postersize': 50.0
-        }
-        total_pages = pages * copies
-        price_per_page = price_map.get(print_type, 5.0)
-        return round(total_pages * price_per_page, 2)
+        # Get price per page for this print type
+        price_key = f"{print_type}_per_page"
+        price_per_page = prices.get(price_key, default_prices.get(price_key, 2))
+        
+        total_price += page_count * price_per_page * copies
+    
+    # Add extras cost
+    if extras:
+        if extras.get('binding'):
+            total_price += prices.get('binding', 10)
+    
+    return total_price
 
 async def send_to_printer_simulation(
     printer_id: str, 
@@ -358,6 +462,60 @@ async def send_to_printer_simulation(
     except Exception as e:
         logger.error(f"Failed to send job {job_id} to printer {printer_id}: {e}")
         raise
+
+def calculate_total_pages_from_config(pages_config: Dict[str, Dict[str, Any]], total_pdf_pages: int) -> int:
+    """
+    Calculate total pages to print from pages configuration
+    """
+    total_pages = 0
+    
+    for print_type, config in pages_config.items():
+        page_str = config.get('pages', '')
+        exclude = config.get('exclude', False)
+        
+        if not page_str.strip():
+            # If no pages specified, use all pages
+            pages_to_print = list(range(1, total_pdf_pages + 1))
+        else:
+            # Parse page string
+            pages_to_print = parse_page_string(page_str, total_pdf_pages)
+        
+        if exclude:
+            # Exclude specified pages
+            all_pages = set(range(1, total_pdf_pages + 1))
+            specified_pages = set(pages_to_print)
+            pages_to_print = list(all_pages - specified_pages)
+        
+        total_pages += len(pages_to_print)
+    
+    return total_pages
+
+def parse_page_string(page_str: str, total_pages: int) -> List[int]:
+    """
+    Parse page string like "1-5, 8, 10-12" into list of page numbers
+    """
+    pages = set()
+    parts = page_str.split(',')
+    
+    for part in parts:
+        part = part.strip()
+        if '-' in part:
+            # Range of pages
+            start_end = part.split('-')
+            if len(start_end) == 2:
+                start = int(start_end[0].strip())
+                end = int(start_end[1].strip())
+                for page in range(start, end + 1):
+                    if page <= total_pages:
+                        pages.add(page)
+        else:
+            # Single page
+            if part.isdigit():
+                page = int(part)
+                if page <= total_pages:
+                    pages.add(page)
+    
+    return sorted(list(pages))
 
 def sync_printer_status_from_simulation(db: Session):
     """Sync printer status from simulation to database"""
@@ -537,25 +695,104 @@ def get_me(current_user: User = Depends(get_current_user)):
         "created_at": current_user.created_at
     }
 
-# ==================== SSE Real-Time Updates ====================
+# ==================== Enhanced SSE Real-Time Updates ====================
 
 @app.get("/orders/stream")
-async def stream_order_updates(current_user: User = Depends(get_current_user)):
-    """SSE endpoint for real-time order updates - NO POLLING NEEDED"""
-    queue = await sse_manager.connect(current_user.user_id)
+async def stream_order_updates(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user)
+):
+    """Enhanced SSE endpoint for real-time order updates with better error handling"""
+    client_info = {
+        "user_agent": "unknown",  # You can extract from headers if needed
+        "ip_address": "unknown",   # You can extract from request if needed
+        "connected_at": datetime.now().isoformat()
+    }
+    
+    queue = await sse_manager.connect(current_user.user_id, client_info)
     
     async def event_generator():
         try:
-            yield f"data: {json.dumps({'event': 'connected', 'user_id': current_user.user_id})}\n\n"
+            # Send connection established event
+            connection_event = {
+                "event": "connected", 
+                "data": {
+                    "user_id": current_user.user_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "message": "Real-time updates connected"
+                }
+            }
+            yield f"data: {json.dumps(connection_event)}\n\n"
+            
+            # Send initial system status
+            try:
+                system_status = await get_initial_system_status(current_user, db)
+                status_event = {
+                    "event": "system_status",
+                    "data": system_status
+                }
+                yield f"data: {json.dumps(status_event)}\n\n"
+            except Exception as e:
+                logger.error(f"Failed to send initial status: {e}")
+            
+            last_heartbeat = datetime.now()
+            heartbeat_interval = 25  # seconds
             
             while True:
                 try:
-                    message = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    yield f"data: {json.dumps(message)}\n\n"
-                except asyncio.TimeoutError:
-                    yield f"data: {json.dumps({'event': 'heartbeat'})}\n\n"
-        except asyncio.CancelledError:
+                    # Check if we need to send heartbeat
+                    now = datetime.now()
+                    if (now - last_heartbeat).seconds >= heartbeat_interval:
+                        heartbeat_event = {
+                            "event": "heartbeat",
+                            "data": {
+                                "timestamp": now.isoformat(),
+                                "message": "Connection alive"
+                            }
+                        }
+                        yield f"data: {json.dumps(heartbeat_event)}\n\n"
+                        last_heartbeat = now
+                    
+                    # Wait for message with timeout
+                    try:
+                        message = await asyncio.wait_for(queue.get(), timeout=30.0)
+                        yield f"data: {json.dumps(message)}\n\n"
+                        
+                        # Mark task as done
+                        queue.task_done()
+                        
+                    except asyncio.TimeoutError:
+                        # Send heartbeat if no messages
+                        heartbeat_event = {
+                            "event": "heartbeat", 
+                            "data": {
+                                "timestamp": datetime.now().isoformat(),
+                                "message": "Connection alive"
+                            }
+                        }
+                        yield f"data: {json.dumps(heartbeat_event)}\n\n"
+                        last_heartbeat = datetime.now()
+                        
+                except asyncio.CancelledError:
+                    logger.info(f"SSE connection cancelled for {current_user.user_id}")
+                    break
+                except Exception as e:
+                    logger.error(f"SSE event generation error for {current_user.user_id}: {e}")
+                    # Send error event to client
+                    error_event = {
+                        "event": "error",
+                        "data": {
+                            "message": "Connection error",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    }
+                    yield f"data: {json.dumps(error_event)}\n\n"
+                    break
+        
+        finally:
+            # Always clean up on exit
             await sse_manager.disconnect(current_user.user_id, queue)
+            logger.info(f"SSE connection closed for {current_user.user_id}")
     
     return StreamingResponse(
         event_generator(),
@@ -563,17 +800,103 @@ async def stream_order_updates(current_user: User = Depends(get_current_user)):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
         }
     )
 
+async def get_initial_system_status(current_user: User, db: Session) -> Dict:
+    """Get initial system status for SSE connection"""
+    try:
+        # Get user's pending orders
+        pending_orders = db.query(Order).filter(
+            Order.user_id == current_user.user_id,
+            Order.status.in_([OrderStatusEnum.PENDING, OrderStatusEnum.PROCESSING])
+        ).all()
+        
+        # Get system alerts count
+        alert_count = db.query(Alert).filter(
+            Alert.status == "unread"
+        ).count()
+        
+        # Get printer status summary
+        printers_online = db.query(Printer).filter(
+            Printer.status.in_([PrinterStatusEnum.ONLINE, PrinterStatusEnum.IDLE])
+        ).count()
+        
+        return {
+            "pending_orders": len(pending_orders),
+            "system_alerts": alert_count,
+            "printers_online": printers_online,
+            "connected_at": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting initial system status: {e}")
+        return {"error": "Failed to get system status"}
+
 # ==================== Webhook from Printer Simulation ====================
+
+# ==================== WebSocket Event Publishing System ====================
+
+class EventPublisher:
+    """Centralized event publishing system"""
+    
+    @staticmethod
+    async def publish_order_event(order: Order, event_type: str, additional_data: Dict = None):
+        """Publish order-related events"""
+        event_data = {
+            "order_id": order.order_id,
+            "status": order.status.value,
+            "user_id": order.user_id,
+            "printer_id": order.printer_id,
+            "pages_count": order.pages_count,
+            "copies": order.copies,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        if additional_data:
+            event_data.update(additional_data)
+        
+        # Send to specific user
+        await sse_manager.send_update(order.user_id, f"order_{event_type}", event_data)
+        
+        # Broadcast to supervisors for important events
+        if event_type in ["created", "failed", "completed"]:
+            await sse_manager.broadcast(
+                f"order_{event_type}", 
+                event_data, 
+                exclude_users=[order.user_id]
+            )
+    
+    @staticmethod
+    async def publish_printer_event(printer_id: str, event_type: str, data: Dict):
+        """Publish printer-related events"""
+        event_data = {
+            "printer_id": printer_id,
+            "timestamp": datetime.now().isoformat(),
+            **data
+        }
+        
+        # Broadcast to all connected users
+        await sse_manager.broadcast(f"printer_{event_type}", event_data)
+    
+    @staticmethod
+    async def publish_system_event(event_type: str, data: Dict):
+        """Publish system-wide events"""
+        event_data = {
+            "timestamp": datetime.now().isoformat(),
+            **data
+        }
+        
+        await sse_manager.broadcast(f"system_{event_type}", event_data)
+
+# ==================== Enhanced Webhook Handler ====================
 
 @app.post("/webhook/printer-update")
 async def printer_webhook(payload: WebhookPrinterUpdate, db: Session = Depends(get_db)):
     """
-    Receives updates from printer simulation
-    This is the ONLY way status changes - no polling!
+    Enhanced webhook handler with event publishing
     """
     logger.info(f"📨 Webhook: {payload.job_id} -> {payload.status} ({payload.progress_percent}%)")
     
@@ -581,6 +904,9 @@ async def printer_webhook(payload: WebhookPrinterUpdate, db: Session = Depends(g
     if not order:
         logger.warning(f"Webhook for unknown order: {payload.job_id}")
         return {"status": "ignored"}
+    
+    # Store old status for comparison
+    old_status = order.status
     
     # Update order based on printer status
     if payload.status == "printing":
@@ -604,13 +930,16 @@ async def printer_webhook(payload: WebhookPrinterUpdate, db: Session = Depends(g
                 queue_entry.started_at = datetime.now()
     
     elif payload.status == "completed":
-        order.status = OrderStatusEnum.COMPLETED
+        if not order.binding_required:
+            order.status = OrderStatusEnum.READY_FOR_DELIVERY
+            order.ready_for_delivery = True
+        else:
+            order.status = OrderStatusEnum.PRINTED
         order.actual_end_time = datetime.now()
         order.completion_date = datetime.now()
-        
         history = OrderHistory(
             order_id=order.order_id,
-            status=OrderStatusEnum.COMPLETED,
+            status=OrderStatusEnum.PRINTED,
             message="Print job completed successfully"
         )
         db.add(history)
@@ -647,18 +976,32 @@ async def printer_webhook(payload: WebhookPrinterUpdate, db: Session = Depends(g
     db.commit()
     db.refresh(order)
     
-    # Push real-time update to user via SSE
-    await sse_manager.send_update(
-        order.user_id,
-        "order_update",
-        {
-            "order_id": order.order_id,
-            "status": order.status.value,
-            "progress": payload.progress_percent,
-            "printer_id": payload.printer_id,
-            "message": payload.message
-        }
-    )
+    # Publish real-time events
+    try:
+        if payload.status == "printing" and old_status != OrderStatusEnum.PROCESSING:
+            await EventPublisher.publish_order_event(
+                order, 
+                "processing",
+                {"progress_percent": payload.progress_percent}
+            )
+        elif payload.status == "completed":
+            await EventPublisher.publish_order_event(order, "completed")
+        elif payload.status == "failed":
+            await EventPublisher.publish_order_event(
+                order, 
+                "failed", 
+                {"error_message": payload.message}
+            )
+        
+        # Always send progress updates
+        await EventPublisher.publish_order_event(
+            order,
+            "progress",
+            {"progress_percent": payload.progress_percent}
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to publish events for {order.order_id}: {e}")
     
     return {"status": "success"}
 
@@ -670,7 +1013,7 @@ async def create_payment_order(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Step 1: Create order(s) and payment - handles both single and bulk"""
+    """Step 1: Create order(s) and payment - handles new format"""
     order_count = len(request.orders)
     logger.info(f"Creating payment for {order_count} order(s) for {current_user.username}")
     
@@ -680,44 +1023,72 @@ async def create_payment_order(
     created_orders = []
     total_price = 0
     bulk_id = f"BULK-{uuid.uuid4().hex[:8].upper()}" if order_count > 1 else None
-    
     try:
         # Create all orders
         for idx, order_request in enumerate(request.orders, 1):
             order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
-            price = calculate_price(
+            
+            total_pdf_pages = order_request.total_page_count
+            
+            # Calculate total pages and price
+            total_pages = calculate_total_pages_from_config(
                 order_request.pages, 
-                order_request.copies, 
-                order_request.print_type, 
-                order_request.store_id, 
+                total_pdf_pages
+            )
+            
+            price = calculate_price_from_config(
+                order_request.pages,
+                order_request.print_type,
+                order_request.copies,
+                order_request.store_id,
+                order_request.extras,
+                total_pdf_pages,
                 db
             )
+            
+            # Calculate binding cost
+            binding_cost = 0
+            binding_required = False
+            if order_request.extras and order_request.extras.get('binding'):
+                store = db.query(Store).filter(Store.store_id == order_request.store_id).first()
+                store_prices = store.pricing_info if store else {}
+                binding_cost = store_prices.get('binding', 10)
+                binding_required = True
+            
             total_price += price
             
             order = Order(
                 order_id=order_id,
                 user_id=current_user.user_id,
                 store_id=order_request.store_id,
-                pages_count=order_request.pages,
+                pages_count=total_pages,
                 copies=order_request.copies,
+                total_pdf_pages=total_pdf_pages,
                 print_settings={
+                    "pages": order_request.pages,
                     "print_type": order_request.print_type,
                     "paper_type": order_request.paper_type,
+                    "mixed": order_request.mixed,
                     "priority": order_request.priority,
                     "duplex": order_request.duplex,
-                    "collate": order_request.collate
+                    "collate": order_request.collate,
+                    "extras": order_request.extras or {}
                 },
                 price=price,
+                binding_cost=binding_cost,
+                binding_required = binding_required,
                 status=OrderStatusEnum.PENDING,
                 payment_status=PaymentStatusEnum.UNPAID,
                 file_url=order_request.file_url,
-                bulk_order_id=bulk_id  # None for single orders
+                bulk_order_id=bulk_id
             )
             
             db.add(order)
             created_orders.append(order)
             
-            message = f"Order created ({order_request.print_type}, {order_request.pages}p × {order_request.copies}c)"
+            # Create order history
+            print_types = list(order_request.pages.keys())
+            message = f"Order created ({', '.join(print_types)}, {total_pages}p × {order_request.copies}c)"
             if order_count > 1:
                 message = f"Bulk order {idx}/{order_count}: {message}"
             
@@ -772,11 +1143,10 @@ async def create_payment_order(
             "order_details": [
                 {
                     "order_id": o.order_id,
-                    "print_type": o.print_settings["print_type"],
-                    "paper_type": o.print_settings["paper_type"],
+                    "print_types": list(o.print_settings["pages"].keys()),
                     "pages": o.pages_count,
                     "copies": o.copies,
-                    "duplex": o.print_settings["duplex"],
+                    "mixed": o.print_settings["mixed"],
                     "price": o.price
                 }
                 for o in created_orders
@@ -791,7 +1161,6 @@ async def create_payment_order(
         logger.error(f"❌ Order creation failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/orders/verify-payment")
 async def verify_payment(
     payload: RazorpayVerifyRequest,
@@ -799,7 +1168,7 @@ async def verify_payment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Step 2: Verify payment and schedule print job(s) - handles both single and bulk"""
+    """Step 2: Verify payment and schedule print job(s) - updated for new format"""
     
     # Find all orders with this razorpay_order_id
     orders = db.query(Order).filter(
@@ -861,28 +1230,84 @@ async def verify_payment(
 
 async def process_print_job(order_id: str, db: Session):
     """
-    Background task: Use production scheduler to assign printer
-    Then send to printer simulation API
+    Updated background task for new order format with enhanced WebSocket events
+    Properly transforms pages_config to scheduler format
     """
     try:
         order = db.query(Order).filter(Order.order_id == order_id).first()
         if not order:
+            logger.error(f"Order {order_id} not found")
             return
         
-        logger.info(f"🔄 Processing print job: {order_id}")
+        logger.info(f"📄 Processing print job: {order_id}")
         
-        # Build order dict for scheduler
         settings = order.print_settings or {}
-        print_type = settings.get("print_type", "bw")
-        paper_type = settings.get("paper_type", "A4")
+        pages_config = settings.get("pages", {})
+        print_types = settings.get("print_type", {})  # Maps print_type -> paper_type
+        total_pdf_pages = order.total_pdf_pages
         
-        scheduler_order = {
-            print_type: {
-                "paper_count": {
-                    paper_type: order.pages_count * order.copies
-                }
+        if not total_pdf_pages:
+            logger.error(f"❌ {order_id}: Missing total_pdf_pages")
+            order.status = OrderStatusEnum.FAILED
+            history = OrderHistory(
+                order_id=order_id,
+                status=OrderStatusEnum.FAILED,
+                message="Missing PDF page count"
+            )
+            db.add(history)
+            db.commit()
+            
+            # Publish failure event
+            await EventPublisher.publish_order_event(
+                order,
+                "failed",
+                {"reason": "missing_pdf_data", "details": "Missing PDF page count"}
+            )
+            return
+        
+        # Build scheduler order format: {print_type: {paper_count: {paper_type: count}}}
+        scheduler_order = {}
+        
+        for print_type, config in pages_config.items():
+            page_str = config.get('pages', '')
+            exclude = config.get('exclude', False)
+            paper_type = print_types.get(print_type, "A4")
+            
+            # Parse which pages to print
+            if not page_str.strip():
+                pages_to_print = list(range(1, total_pdf_pages + 1))
+            else:
+                pages_to_print = parse_page_string(page_str, total_pdf_pages)
+            
+            if exclude:
+                all_pages = set(range(1, total_pdf_pages + 1))
+                specified_pages = set(pages_to_print)
+                pages_to_print = list(all_pages - specified_pages)
+            
+            page_count = len(pages_to_print)
+            total_sheets = page_count * order.copies
+            
+            # Build scheduler format
+            if print_type not in scheduler_order:
+                scheduler_order[print_type] = {"paper_count": {}}
+            
+            if paper_type not in scheduler_order[print_type]["paper_count"]:
+                scheduler_order[print_type]["paper_count"][paper_type] = 0
+            
+            scheduler_order[print_type]["paper_count"][paper_type] += total_sheets
+        
+        logger.info(f"📊 Scheduler order for {order_id}: {scheduler_order}")
+        
+        # Publish scheduling started event
+        await EventPublisher.publish_order_event(
+            order,
+            "scheduling_started",
+            {
+                "print_types": list(pages_config.keys()),
+                "total_pages": sum(len(parse_page_string(config.get('pages', ''), total_pdf_pages)) 
+                                 for config in pages_config.values()) * order.copies
             }
-        }
+        )
         
         # Use production scheduler
         try:
@@ -906,15 +1331,17 @@ async def process_print_job(order_id: str, db: Session):
                 "scores": result['scores']
             }
             order.status = OrderStatusEnum.PROCESSING
-            
+            store_id = order.store_id
+
             # Create queue entry
             queue_entry = JobQueueEntry(
                 printer_id=assigned_printer,
                 order_id=order_id,
+                store_id=store_id,
                 queue_position=0,
                 priority=settings.get("priority", 5),
                 status=JobQueueStatusEnum.QUEUED,
-                suborder_types=[print_type],
+                suborder_types=list(pages_config.keys()),
                 scheduler_score=score
             )
             db.add(queue_entry)
@@ -928,30 +1355,108 @@ async def process_print_job(order_id: str, db: Session):
             db.add(history)
             db.commit()
             
-            # Notify user via SSE
-            await sse_manager.send_update(
-                order.user_id,
-                "order_scheduled",
+            # Publish successful scheduling event
+            await EventPublisher.publish_order_event(
+                order,
+                "scheduled",
                 {
-                    "order_id": order_id,
                     "printer_id": assigned_printer,
-                    "score": score
+                    "score": score,
+                    "suborders": result['suborders'],
+                    "estimated_start": order.estimated_start_time.isoformat() if order.estimated_start_time else None,
+                    "queue_position": 0
                 }
             )
             
-            # Send to printer simulation
-            await send_to_printer_simulation(
+            # Publish printer assignment event
+            await EventPublisher.publish_printer_event(
                 assigned_printer,
-                order_id,
-                order.pages_count,
-                order.copies,
-                print_type,
-                paper_type,
-                settings.get("duplex", False),
-                order.file_url
+                "job_assigned",
+                {
+                    "order_id": order_id,
+                    "job_type": "mixed" if len(pages_config) > 1 else list(pages_config.keys())[0],
+                    "suborder_count": len(pages_config),
+                    "total_pages": order.pages_count
+                }
             )
             
-            logger.info(f"✅ Job {order_id} sent to printer simulation")
+            # Send individual print requests to printer simulation for each print type
+            print_jobs_sent = 0
+            for print_type, config in pages_config.items():
+                page_str = config.get('pages', '')
+                exclude = config.get('exclude', False)
+                paper_type = print_types.get(print_type, "A4")
+                
+                if not page_str.strip():
+                    pages_list = list(range(1, total_pdf_pages + 1))
+                else:
+                    pages_list = parse_page_string(page_str, total_pdf_pages)
+                
+                if exclude:
+                    all_pages = set(range(1, total_pdf_pages + 1))
+                    pages_list = list(all_pages - set(pages_list))
+                
+                # Send to printer simulation
+                try:
+                    await send_to_printer_simulation(
+                        printer_id=assigned_printer,
+                        job_id=f"{order_id}-{print_type}",
+                        pages=len(pages_list),
+                        copies=order.copies,
+                        print_type=print_type,
+                        paper_type=paper_type,
+                        duplex=settings.get("duplex", False),
+                        file_url=order.file_url
+                    )
+                    print_jobs_sent += 1
+                    
+                    # Publish subjob sent event
+                    await EventPublisher.publish_order_event(
+                        order,
+                        "subjob_sent",
+                        {
+                            "subjob_type": print_type,
+                            "pages": len(pages_list),
+                            "paper_type": paper_type,
+                            "printer_id": assigned_printer
+                        }
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Failed to send subjob {print_type} for {order_id}: {e}")
+                    await EventPublisher.publish_order_event(
+                        order,
+                        "subjob_failed",
+                        {
+                            "subjob_type": print_type,
+                            "error": str(e),
+                            "printer_id": assigned_printer
+                        }
+                    )
+            
+            if print_jobs_sent > 0:
+                logger.info(f"✅ Job {order_id} sent to printer simulation ({print_jobs_sent} subjobs)")
+                
+                # Publish all jobs sent event
+                await EventPublisher.publish_order_event(
+                    order,
+                    "all_jobs_sent",
+                    {
+                        "total_subjobs": len(pages_config),
+                        "successful_subjobs": print_jobs_sent,
+                        "printer_id": assigned_printer
+                    }
+                )
+            else:
+                logger.error(f"❌ All subjobs failed for {order_id}")
+                await EventPublisher.publish_order_event(
+                    order,
+                    "all_jobs_failed",
+                    {
+                        "printer_id": assigned_printer,
+                        "reason": "all_subjobs_failed"
+                    }
+                )
             
         except InsufficientResourceError as e:
             order.status = OrderStatusEnum.FAILED
@@ -963,10 +1468,14 @@ async def process_print_job(order_id: str, db: Session):
             db.add(history)
             db.commit()
             
-            await sse_manager.send_update(
-                order.user_id,
-                "order_failed",
-                {"order_id": order_id, "reason": "insufficient_resources", "details": str(e)}
+            await EventPublisher.publish_order_event(
+                order,
+                "failed",
+                {
+                    "reason": "insufficient_resources", 
+                    "details": str(e),
+                    "scheduler_error": True
+                }
             )
             
             logger.error(f"❌ {order_id} failed: Insufficient resources")
@@ -981,10 +1490,14 @@ async def process_print_job(order_id: str, db: Session):
             db.add(history)
             db.commit()
             
-            await sse_manager.send_update(
-                order.user_id,
-                "order_failed",
-                {"order_id": order_id, "reason": "no_printer", "details": str(e)}
+            await EventPublisher.publish_order_event(
+                order,
+                "failed",
+                {
+                    "reason": "no_capable_printer", 
+                    "details": str(e),
+                    "scheduler_error": True
+                }
             )
             
             logger.error(f"❌ {order_id} failed: No capable printer")
@@ -999,10 +1512,14 @@ async def process_print_job(order_id: str, db: Session):
             db.add(history)
             db.commit()
             
-            await sse_manager.send_update(
-                order.user_id,
-                "order_failed",
-                {"order_id": order_id, "reason": "queue_full", "details": str(e)}
+            await EventPublisher.publish_order_event(
+                order,
+                "failed",
+                {
+                    "reason": "queue_overflow", 
+                    "details": str(e),
+                    "scheduler_error": True
+                }
             )
             
             logger.error(f"❌ {order_id} failed: Queue overflow")
@@ -1017,16 +1534,35 @@ async def process_print_job(order_id: str, db: Session):
             db.add(history)
             db.commit()
             
-            await sse_manager.send_update(
-                order.user_id,
-                "order_failed",
-                {"order_id": order_id, "reason": "scheduler_error", "details": str(e)}
+            await EventPublisher.publish_order_event(
+                order,
+                "failed",
+                {
+                    "reason": "scheduler_error", 
+                    "details": str(e),
+                    "scheduler_error": True
+                }
             )
             
             logger.error(f"❌ {order_id} failed: {e}")
             
     except Exception as e:
         logger.error(f"Background task error for {order_id}: {e}")
+        
+        # Publish generic error event
+        try:
+            order = db.query(Order).filter(Order.order_id == order_id).first()
+            if order:
+                await EventPublisher.publish_order_event(
+                    order,
+                    "failed",
+                    {
+                        "reason": "background_task_error",
+                        "details": str(e)
+                    }
+                )
+        except Exception as pub_error:
+            logger.error(f"Failed to publish error event for {order_id}: {pub_error}")
 
 # ==================== Order Queries ====================
 
@@ -1285,7 +1821,7 @@ async def get_system_stats(db: Session = Depends(get_db)):
     
     # Database stats
     total_orders = db.query(Order).count()
-    completed = db.query(Order).filter(Order.status == OrderStatusEnum.COMPLETED).count()
+    completed = db.query(Order).filter(Order.status == OrderStatusEnum.PRINTED).count()
     pending = db.query(Order).filter(Order.status == OrderStatusEnum.PENDING).count()
     processing = db.query(Order).filter(Order.status == OrderStatusEnum.PROCESSING).count()
     failed = db.query(Order).filter(Order.status == OrderStatusEnum.FAILED).count()
@@ -1439,6 +1975,25 @@ async def upload_bulk_files(
 
 # ==================== System Management ====================
 
+@app.get("/system/connections")
+async def get_connection_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get real-time connection statistics (admin/supervisor only)"""
+    # In production, add proper role checking here
+    stats = await sse_manager.get_connection_stats()
+    
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "connections": stats,
+        "system_health": {
+            "sse_manager": "healthy",
+            "database": "connected",
+            "printer_api": "connected"  # You can add actual checks
+        }
+    }
+
 @app.post("/system/sync-printers")
 def sync_printers(db: Session = Depends(get_db)):
     """Manually sync printer status from simulation"""
@@ -1508,6 +2063,68 @@ def health_check(db: Session = Depends(get_db)):
         "version": "3.0"
     }
 
+@app.post("/api/alerts/create")
+async def create_alert_from_printer(
+    alert_data: dict,
+    db: Session = Depends(get_db)
+):
+    """Create alert from printer simulation"""
+    try:
+        # Map alert types
+        alert_type_map = {
+            "paper_out": AlertTypeEnum.PAPER_EMPTY,
+            "paper_critical": AlertTypeEnum.LOW_PAPER,
+            "paper_low": AlertTypeEnum.LOW_PAPER,
+            "ink_empty": AlertTypeEnum.LOW_INK,
+            "ink_critical": AlertTypeEnum.LOW_INK,
+            "ink_low": AlertTypeEnum.LOW_INK,
+            "paper_jam": AlertTypeEnum.JAM,
+            "maintenance_overdue": AlertTypeEnum.MAINTENANCE,
+            "temperature_critical": AlertTypeEnum.OTHER,
+            "temperature_high": AlertTypeEnum.OTHER
+        }
+        
+        alert_type = alert_type_map.get(
+            alert_data.get("alert_type", "").lower(),
+            AlertTypeEnum.OTHER
+        )
+        
+        # Get printer to find store_id
+        printer = db.query(Printer).filter(
+            Printer.printer_id == alert_data.get("printer_id")
+        ).first()
+        
+        if not printer:
+            logger.warning(f"Printer not found for alert: {alert_data.get('printer_id')}")
+            return {"status": "ignored", "reason": "printer_not_found"}
+        
+        # Create alert
+        alert = Alert(
+            store_id=printer.store_id,
+            printer_id=alert_data.get("printer_id"),
+            alert_type=alert_type,
+            alert_message=alert_data.get("alert_message"),
+            severity=AlertSeverityEnum(alert_data.get("severity", "Info")),
+            status=AlertStatus["UNREAD"],
+            metadata=alert_data.get("metadata")
+        )
+        
+        db.add(alert)
+        db.commit()
+        db.refresh(alert)
+        
+        logger.info(f"✅ Alert created: {alert.alert_id} - {alert.alert_message}")
+        
+        return {
+            "status": "success",
+            "alert_id": alert.alert_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to create alert: {e}")
+        return {"status": "error", "detail": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

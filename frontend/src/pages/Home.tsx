@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { X, Loader, Users, Shield } from 'lucide-react';
 
 const Home: React.FC = () => {
-  const { isAuthenticated, signin, signup } = useAuth();
+  const { isAuthenticated, signin, signup, userRole } = useAuth();
   const navigate = useNavigate();
   
   const [selectedRole, setSelectedRole] = useState<'customer' | 'supervisor' | null>(null);
@@ -12,26 +12,40 @@ const Home: React.FC = () => {
   const [showSignUp, setShowSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
   // Sign In Form State
   const [signInData, setSignInData] = useState({
     username: '',
     password: '',
   });
 
-  // Sign Up Form State
-  const [signUpData, setSignUpData] = useState({
+  // Customer Sign Up Form State
+  const [customerSignUpData, setCustomerSignUpData] = useState({
     email: '',
     username: '',
     password: '',
     full_name: '',
   });
 
+  // Supervisor Sign Up Form State
+  const [supervisorSignUpData, setSupervisorSignUpData] = useState({
+    email: '',
+    username: '',
+    password: '',
+    store_id: '',
+    contact_number: '',
+    address: '',
+  });
+
   React.useEffect(() => {
     if (isAuthenticated) {
-      navigate('/dashboard');
+      // Redirect based on user role
+      if (userRole === 'supervisor') {
+        navigate('/supervisor/dashboard');
+      } else {
+        navigate('/dashboard');
+      }
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, userRole, navigate]);
 
   const handleRoleClick = (role: 'customer' | 'supervisor') => {
     setSelectedRole(role);
@@ -42,11 +56,11 @@ const Home: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     setError('');
-
+  
     try {
-      await signin(signInData.username, signInData.password);
+      await signin(signInData.username, signInData.password, selectedRole!);
       setShowSignIn(false);
-      navigate('/dashboard');
+      // Navigation is now handled by the useEffect above
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -58,16 +72,33 @@ const Home: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     setError('');
-
+  
     try {
-      await signup(
-        signUpData.email,
-        signUpData.username,
-        signUpData.password,
-        signUpData.full_name
-      );
+      if (selectedRole === 'supervisor') {
+        await signup(
+          supervisorSignUpData.email,
+          supervisorSignUpData.username,
+          supervisorSignUpData.password,
+          'supervisor',
+          {
+            store_id: supervisorSignUpData.store_id,
+            contact_number: supervisorSignUpData.contact_number,
+            address: supervisorSignUpData.address,
+          }
+        );
+      } else {
+        await signup(
+          customerSignUpData.email,
+          customerSignUpData.username,
+          customerSignUpData.password,
+          'customer',
+          {
+            full_name: customerSignUpData.full_name,
+          }
+        );
+      }
       setShowSignUp(false);
-      navigate('/dashboard');
+      // Navigation is now handled by the useEffect above
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -216,7 +247,7 @@ const Home: React.FC = () => {
       {/* Sign Up Modal */}
       {showSignUp && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 relative">
+          <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={resetModals}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
@@ -247,56 +278,138 @@ const Home: React.FC = () => {
             )}
 
             <form onSubmit={handleSignUp}>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={signUpData.email}
-                  onChange={(e) => setSignUpData({ ...signUpData, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
+              {selectedRole === 'customer' ? (
+                <>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={customerSignUpData.email}
+                      onChange={(e) => setCustomerSignUpData({ ...customerSignUpData, email: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
 
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Username
-                </label>
-                <input
-                  type="text"
-                  value={signUpData.username}
-                  onChange={(e) => setSignUpData({ ...signUpData, username: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Username
+                    </label>
+                    <input
+                      type="text"
+                      value={customerSignUpData.username}
+                      onChange={(e) => setCustomerSignUpData({ ...customerSignUpData, username: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
 
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  value={signUpData.full_name}
-                  onChange={(e) => setSignUpData({ ...signUpData, full_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Full Name
+                    </label>
+                    <input
+                      type="text"
+                      value={customerSignUpData.full_name}
+                      onChange={(e) => setCustomerSignUpData({ ...customerSignUpData, full_name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
 
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  value={signUpData.password}
-                  onChange={(e) => setSignUpData({ ...signUpData, password: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      value={customerSignUpData.password}
+                      onChange={(e) => setCustomerSignUpData({ ...customerSignUpData, password: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={supervisorSignUpData.email}
+                      onChange={(e) => setSupervisorSignUpData({ ...supervisorSignUpData, email: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Username
+                    </label>
+                    <input
+                      type="text"
+                      value={supervisorSignUpData.username}
+                      onChange={(e) => setSupervisorSignUpData({ ...supervisorSignUpData, username: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      value={supervisorSignUpData.password}
+                      onChange={(e) => setSupervisorSignUpData({ ...supervisorSignUpData, password: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Store ID
+                    </label>
+                    <input
+                      type="text"
+                      value={supervisorSignUpData.store_id}
+                      onChange={(e) => setSupervisorSignUpData({ ...supervisorSignUpData, store_id: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Contact Number
+                    </label>
+                    <input
+                      type="tel"
+                      value={supervisorSignUpData.contact_number}
+                      onChange={(e) => setSupervisorSignUpData({ ...supervisorSignUpData, contact_number: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Address
+                    </label>
+                    <textarea
+                      value={supervisorSignUpData.address}
+                      onChange={(e) => setSupervisorSignUpData({ ...supervisorSignUpData, address: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      rows={2}
+                    />
+                  </div>
+                </>
+              )}
 
               <button
                 type="submit"

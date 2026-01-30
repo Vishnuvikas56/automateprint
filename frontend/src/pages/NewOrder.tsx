@@ -21,6 +21,7 @@ interface Store {
     thick_per_page: number;
     glossy_per_page: number;
     poster_per_page: number;
+    binding: number;
   };
 }
 
@@ -67,6 +68,14 @@ const PRICES = {
   binding: 10,
 };
 
+// Paper type mapping
+const PAPER_TYPES = {
+  bw: 'A4',
+  color: 'A4',
+  glossy: 'Glossy',
+  thick: 'Thick'
+};
+
 export default function NewOrder() {
   const navigate = useNavigate();
   const [stores, setStores] = useState<Store[]>([]);
@@ -84,7 +93,7 @@ export default function NewOrder() {
 
   const [formData, setFormData] = useState({
     store_id: 'STORE001',
-    priority: 5, // Backend expects 1-10 scale, 5 is normal
+    priority: 5,
   });
 
   const [configs, setConfigs] = useState<DocumentConfig[]>([]);
@@ -307,6 +316,50 @@ export default function NewOrder() {
     return { breakdown, total: grandTotal };
   };
 
+  // In the buildOrderPayload function, add total_page_count:
+  const buildOrderPayload = (config: DocumentConfig, file: UploadedFile) => {
+    const pages: { [key: string]: { pages: string; exclude: boolean } } = {};
+    const printType: { [key: string]: string } = {};
+    const paperType: { [key: string]: string } = {};
+
+    if (config.printMode === 'mixed') {
+      const enabledOptions = config.mixedOptions.filter(opt => opt.enabled);
+      
+      enabledOptions.forEach(opt => {
+        pages[opt.type] = {
+          pages: opt.pages,
+          exclude: false
+        };
+        printType[opt.type] = PAPER_TYPES[opt.type];
+        paperType[opt.type] = PAPER_TYPES[opt.type];
+      });
+    } else {
+      pages[config.printMode] = {
+        pages: config.pageNumbers,
+        exclude: config.excludePages
+      };
+      printType[config.printMode] = PAPER_TYPES[config.printMode];
+      paperType[config.printMode] = PAPER_TYPES[config.printMode];
+    }
+
+    return {
+      pages,
+      print_type: printType,
+      paper_type: paperType,
+      mixed: config.printMode === 'mixed',
+      copies: config.copies,
+      priority: formData.priority,
+      duplex: false,
+      collate: true,
+      store_id: formData.store_id,
+      file_url: file.file_url,
+      extras: {
+        binding: config.binding
+      },
+      total_page_count: file.page_count // ← ADD THIS LINE
+    };
+  };
+
   const handleFilesSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
 
@@ -371,50 +424,10 @@ export default function NewOrder() {
     setPreviewFile(previewFile === fileUrl ? null : fileUrl);
   };
 
-  const calculateTotalPagesForBackend = (config: DocumentConfig, file: UploadedFile): number => {
-    if (!file.page_count) return 0;
-
-    if (config.printMode === 'mixed') {
-      const enabledOptions = config.mixedOptions.filter(opt => opt.enabled);
-      let accountedPages = new Set<number>();
-      let totalPages = 0;
-
-      enabledOptions.forEach(opt => {
-        if (opt.pages.trim()) {
-          const pages = calculatePagesFromString(opt.pages, file.page_count!);
-          pages.forEach(p => accountedPages.add(p));
-          totalPages += pages.length;
-        }
-      });
-
-      const blankOption = enabledOptions.find(opt => !opt.pages.trim());
-      if (blankOption) {
-        totalPages += (file.page_count - accountedPages.size);
-      }
-
-      return totalPages;
-    } else {
-      let pagesToPrint: number[];
-      
-      if (config.pageNumbers.trim()) {
-        pagesToPrint = calculatePagesFromString(config.pageNumbers, file.page_count);
-        
-        if (config.excludePages) {
-          const allPages = Array.from({ length: file.page_count }, (_, i) => i + 1);
-          pagesToPrint = allPages.filter(p => !pagesToPrint.includes(p));
-        }
-      } else {
-        pagesToPrint = Array.from({ length: file.page_count }, (_, i) => i + 1);
-      }
-
-      return pagesToPrint.length;
-    }
-  };
-
   const handleRazorpayPayment = (paymentData: any) => {
     const options = {
       key: paymentData.key_id,
-      amount: paymentData.amount * 100, // Convert to paise
+      amount: paymentData.amount * 100,
       currency: paymentData.currency,
       order_id: paymentData.razorpay_order_id,
       name: 'Print Management System',
@@ -423,7 +436,6 @@ export default function NewOrder() {
         : `Order: ${paymentData.order_ids[0]}`,
       handler: async function (response: any) {
         try {
-          // Verify payment with backend
           const verifyResponse = await axios.post(
             `${API_BASE_URL}/orders/verify-payment`,
             {
@@ -440,7 +452,6 @@ export default function NewOrder() {
             setSuccess(true);
             setLoading(false);
             
-            // Start SSE connection for all order IDs
             verifyResponse.data.order_ids.forEach((orderId: string) => {
               connectToSSE(orderId);
             });
@@ -486,7 +497,6 @@ export default function NewOrder() {
         if (data.event === 'order_update' && data.data.order_id === orderId) {
           console.log('Order update:', data.data);
           
-          // Update UI based on order status
           if (data.data.status === 'completed') {
             console.log('Order completed!');
             eventSource.close();
@@ -505,7 +515,6 @@ export default function NewOrder() {
       eventSource.close();
     };
 
-    // Close connection after 5 minutes
     setTimeout(() => {
       eventSource.close();
     }, 300000);
@@ -569,28 +578,16 @@ export default function NewOrder() {
     setLoading(true);
 
     try {
-      // Build orders array for bulk payment
+      // Build orders array in new format
       const orders = uploadedFiles.map((file, index) => {
         const config = configs[index];
-        const totalPages = calculateTotalPagesForBackend(config, file);
-
-        return {
-          pages: totalPages,
-          copies: config.copies,
-          print_type: config.printMode,
-          paper_type: 'A4',
-          priority: formData.priority,
-          duplex: false,
-          collate: true,
-          store_id: formData.store_id,
-          file_url: file.file_url,
-        };
+        return buildOrderPayload(config, file);
       });
 
       // Create single payment for all orders
       const response = await axios.post(
         `${API_BASE_URL}/orders/create-payment`,
-        { orders }, // Send as { orders: [...] }
+        { orders },
         {
           headers: { Authorization: `Bearer ${getAuthToken()}` }
         }
@@ -814,7 +811,7 @@ export default function NewOrder() {
         <p className="text-gray-600 mb-4">Your print job(s) are being processed...</p>
         <p className="text-sm text-gray-500 mb-6">You'll receive real-time updates on order status</p>
         <button
-          onClick={() => navigate('/orders')}
+          onClick={() => navigate('/my-orders')}
           className="px-6 py-3 bg-blue-600 text-white rounded-md font-semibold hover:bg-blue-700"
         >
           View My Orders

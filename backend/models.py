@@ -1,12 +1,13 @@
 """
-SQLAlchemy Database Models - Production-Grade with Job Queue Persistence
+SQLAlchemy Database Models - Updated for new order format
 """
 
 from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, JSON, ForeignKey, Text, Enum as SQLEnum
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from datetime import datetime
 from database import Base
 import enum
+from typing import Optional
 
 # ==================== Enums ====================
 
@@ -43,10 +44,13 @@ class StoreStatusEnum(str, enum.Enum):
 class OrderStatusEnum(str, enum.Enum):
     PENDING = "Pending"
     PROCESSING = "Processing"
-    COMPLETED = "Completed"
+    PRINTED = "Printed"
+    READY_FOR_DELIVERY = "Ready for delivery"
+    DELIVERED = "Delivered"
     CANCELLED = "Cancelled"
     FAILED = "Failed"
     QUEUED = "Queued"
+    COMPLETED = "Completed"
 
 class PaymentStatusEnum(str, enum.Enum):
     PAID = "Paid"
@@ -82,6 +86,25 @@ class JobQueueStatusEnum(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+class QueryStatusEnum(str, enum.Enum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    RESOLVED = "resolved"
+
+class QueryTypeEnum(str, enum.Enum):
+    PRINTER = "printer"
+    USER_ORDER = "user_order"
+    INVENTORY = "inventory"
+    SYSTEM = "system"
+    OTHER = "other"
+
+class PrinterDownReasonEnum(str, enum.Enum):
+    PAPER_JAM = "paper_jam"
+    TONER_EMPTY = "toner_empty"
+    NETWORK_ISSUE = "network_issue"
+    MAINTENANCE = "maintenance"
+    OTHER = "other"
 
 # ==================== Models ====================
 
@@ -124,6 +147,7 @@ class Store(Base):
     printers = relationship("Printer", back_populates="store")
     orders = relationship("Order", back_populates="store")
     alerts = relationship("Alert", back_populates="store")
+    job_queue_entries = relationship("JobQueueEntry", back_populates="store", cascade="all, delete-orphan")
 
 class SupervisorData(Base):
     __tablename__ = "supervisor_data"
@@ -134,6 +158,7 @@ class SupervisorData(Base):
     password = Column(String(255), nullable=False)
     role = Column(SQLEnum(RoleEnum), default=RoleEnum.OPERATOR)
     address = Column(Text)
+    notification_preferences = Column(JSON, nullable=True)
     contact_number = Column(String(20))
     email = Column(String(255))
     available = Column(Boolean, default=True)
@@ -141,10 +166,15 @@ class SupervisorData(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime)
     
-    # Relationships
+    # Relationships - ADD foreign_keys specification
     store = relationship("Store", back_populates="supervisors")
     assigned_orders = relationship("Order", back_populates="assigned_supervisor")
-    alerts = relationship("Alert", back_populates="supervisor")
+    alerts = relationship(
+        "Alert", 
+        back_populates="supervisor",
+        foreign_keys="[Alert.supervisor_id]",  # Specify which foreign key to use
+        overlaps="acknowledged_supervisor,fixed_supervisor"
+    )
 
 class Printer(Base):
     __tablename__ = "printers"
@@ -164,10 +194,10 @@ class Printer(Base):
     paper_available = Column(Integer, default=500)
     ink_toner_level = Column(JSON)
     
-    # ✅ NEW: Job queue persistence
-    job_queue = Column(JSON, default=list)  # Store queue as JSON array
-    current_job_id = Column(String(50), nullable=True)  # Currently processing job
-    queue_length = Column(Integer, default=0)  # Quick queue size lookup
+    # Job queue persistence
+    job_queue = Column(JSON, default=list)
+    current_job_id = Column(String(50), nullable=True)
+    queue_length = Column(Integer, default=0)
     
     unauthorized_access = Column(Boolean, default=False)
     assigned_supervisor_id = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=True)
@@ -198,12 +228,16 @@ class Order(Base):
     completion_date = Column(DateTime, nullable=True)
     status = Column(SQLEnum(OrderStatusEnum), default=OrderStatusEnum.PENDING, index=True)
     pages_count = Column(Integer, nullable=False)
+    total_pdf_pages: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     copies = Column(Integer, default=1)
     print_settings = Column(JSON)
     price = Column(Float, nullable=False)
     payment_status = Column(SQLEnum(PaymentStatusEnum), default=PaymentStatusEnum.UNPAID)
     assigned_supervisor_id = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=True)
-    
+    ready_for_delivery = Column(Boolean, default=False, index=True)
+    binding_required = Column(Boolean, default=False, index=True)
+    binding_done = Column(Boolean, default=False, index=True)
+    delivery_details = Column(JSON)
     # Payment info
     razorpay_order_id = Column(String(100))
     razorpay_payment_id = Column(String(100))
@@ -212,8 +246,8 @@ class Order(Base):
     # File storage
     file_url = Column(Text, nullable=True)
     
-    # ✅ NEW: Bulk order tracking
-    bulk_order_id = Column(String(50), nullable=True, index=True)  # Links multiple orders together
+    # Bulk order tracking
+    bulk_order_id = Column(String(50), nullable=True, index=True)
     
     # Scheduling fields
     estimated_start_time = Column(DateTime, nullable=True)
@@ -225,6 +259,9 @@ class Order(Base):
     queue_position = Column(Integer, nullable=True)
     scheduler_score = Column(Float, nullable=True)
     scheduler_metadata = Column(JSON, nullable=True)
+    
+    # NEW: Add binding cost field
+    binding_cost = Column(Float, default=0.0)
     
     # Relationships
     user = relationship("User", back_populates="orders")
@@ -251,14 +288,37 @@ class Alert(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     resolved_at = Column(DateTime, nullable=True)
     
-    # Additional context
-    # metadata = Column(JSON, nullable=True)
+    # NEW FIELDS
+    acknowledged = Column(Boolean, default=False, index=True)
+    acknowledged_by = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+    fixed = Column(Boolean, default=False, index=True)
+    fixed_by = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=True)
+    fixed_at = Column(DateTime, nullable=True)
+    muted = Column(Boolean, default=False, index=True)
+    muted_until = Column(DateTime, nullable=True)
+    action_taken = Column(String(255), nullable=True)
+    alert_metadata = Column('metadata', JSON, nullable=True)
     
-    # Relationships
+    # Relationships - SPECIFY foreign_keys for each relationship
     store = relationship("Store", back_populates="alerts")
     printer = relationship("Printer", back_populates="alerts")
     order = relationship("Order", back_populates="alerts")
-    supervisor = relationship("SupervisorData", back_populates="alerts")
+    supervisor = relationship(
+        "SupervisorData", 
+        back_populates="alerts", 
+        foreign_keys=[supervisor_id]
+    )
+    acknowledged_supervisor = relationship(
+        "SupervisorData", 
+        foreign_keys=[acknowledged_by],
+        overlaps="supervisor"
+    )
+    fixed_supervisor = relationship(
+        "SupervisorData", 
+        foreign_keys=[fixed_by],
+        overlaps="supervisor,acknowledged_supervisor"
+    )
 
 class PaymentTransaction(Base):
     __tablename__ = "payment_transactions"
@@ -270,7 +330,7 @@ class PaymentTransaction(Base):
     razorpay_signature = Column(String(255))
     amount = Column(Float, nullable=False)
     currency = Column(String(10), default="INR")
-    status = Column(String(20), default="created")  # created, success, failed, refunded
+    status = Column(String(20), default="created")
     gateway_response = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -285,13 +345,12 @@ class OrderHistory(Base):
     order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=False, index=True)
     status = Column(SQLEnum(OrderStatusEnum), nullable=False)
     message = Column(Text)
-    meta = Column(JSON)  # Additional context
+    meta = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     
     # Relationships
     order = relationship("Order", back_populates="history")
 
-# ✅ NEW: Job Queue Persistence Table
 class JobQueueEntry(Base):
     """
     Persistent job queue storage - tracks job position in printer queues
@@ -299,12 +358,16 @@ class JobQueueEntry(Base):
     __tablename__ = "job_queue_entries"
     
     queue_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # NEW STORE COLUMN
+    store_id = Column(String(50), ForeignKey("stores.store_id"), nullable=False, index=True)
+    
     printer_id = Column(String(50), ForeignKey("printers.printer_id"), nullable=False, index=True)
     order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=False, unique=True, index=True)
-    
+
     # Queue management
-    queue_position = Column(Integer, nullable=False, index=True)  # Position in queue (0 = first)
-    priority = Column(Integer, default=5)  # Job priority (1-10, lower = higher priority)
+    queue_position = Column(Integer, nullable=False, index=True)
+    priority = Column(Integer, default=5)
     
     # Status
     status = Column(SQLEnum(JobQueueStatusEnum), default=JobQueueStatusEnum.QUEUED, index=True)
@@ -315,18 +378,19 @@ class JobQueueEntry(Base):
     completed_at = Column(DateTime, nullable=True)
     
     # Metadata
-    suborder_types = Column(JSON, nullable=True)  # Types of prints in this job
+    suborder_types = Column(JSON, nullable=True)
     scheduler_score = Column(Float, nullable=True)
     estimated_duration_minutes = Column(Float, nullable=True)
     
     # Relationships
     printer = relationship("Printer", back_populates="job_queue_entries")
     order = relationship("Order", back_populates="queue_entry")
+    store = relationship("Store", back_populates="job_queue_entries")
     
     def __repr__(self):
-        return f"<JobQueueEntry(printer={self.printer_id}, order={self.order_id}, pos={self.queue_position})>"
+        return f"<JobQueueEntry(store={self.store_id}, printer={self.printer_id}, order={self.order_id}, pos={self.queue_position})>"
 
-# ✅ NEW: System Metrics for monitoring
+
 class SystemMetrics(Base):
     """
     Store system performance metrics over time
@@ -363,8 +427,69 @@ class SystemMetrics(Base):
     total_revenue = Column(Float, default=0.0)
     revenue_per_hour = Column(Float, default=0.0)
     
-    # Additional data
-    # metadata = Column(JSON, nullable=True)
-    
     def __repr__(self):
         return f"<SystemMetrics(timestamp={self.timestamp}, orders={self.total_orders})>"
+    
+class SupervisorActivityLog(Base):
+    """Tracks all supervisor actions"""
+    __tablename__ = "supervisor_activity_logs"
+    
+    log_id = Column(Integer, primary_key=True, autoincrement=True)
+    supervisor_id = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=False, index=True)
+    action = Column(String(255), nullable=False)
+    entity_type = Column(String(50), nullable=False)
+    entity_id = Column(String(50), nullable=True)
+    old_value = Column(JSON, nullable=True)
+    new_value = Column(JSON, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    ip_address = Column(String(45), nullable=True)
+    
+    # Relationships
+    supervisor = relationship("SupervisorData")
+
+class SupervisorQuery(Base):
+    """Supervisor-raised issues/queries"""
+    __tablename__ = "supervisor_queries"
+    
+    query_id = Column(String(50), primary_key=True, index=True)
+    supervisor_id = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=False)
+    query_type = Column(SQLEnum(QueryTypeEnum), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    status = Column(SQLEnum(QueryStatusEnum), default=QueryStatusEnum.OPEN, index=True)
+    priority = Column(SQLEnum(AlertSeverityEnum), default=AlertSeverityEnum.INFO)
+    
+    # Related entities
+    printer_id = Column(String(50), ForeignKey("printers.printer_id"), nullable=True)
+    order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=True)
+    
+    # File attachment
+    file_url = Column(Text, nullable=True)
+    file_name = Column(String(255), nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    supervisor = relationship("SupervisorData")
+    printer = relationship("Printer")
+    order = relationship("Order")
+
+class PrinterDownHistory(Base):
+    """Tracks printer downtime with reasons"""
+    __tablename__ = "printer_down_history"
+    
+    history_id = Column(Integer, primary_key=True, autoincrement=True)
+    printer_id = Column(String(50), ForeignKey("printers.printer_id"), nullable=False, index=True)
+    supervisor_id = Column(String(50), ForeignKey("supervisor_data.admin_id"), nullable=False)
+    reason = Column(SQLEnum(PrinterDownReasonEnum), nullable=False)
+    description = Column(Text, nullable=True)
+    down_time = Column(DateTime, default=datetime.utcnow, index=True)
+    up_time = Column(DateTime, nullable=True)
+    duration_minutes = Column(Integer, nullable=True)
+    
+    # Relationships
+    printer = relationship("Printer")
+    supervisor = relationship("SupervisorData")

@@ -48,18 +48,31 @@ export const MyOrders: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
-      case 'completed':
-        return 'bg-green-100 text-green-800';
       case 'processing':
-        return 'bg-blue-100 text-blue-800';
+        return 'bg-indigo-100 text-indigo-700';
+  
+      case 'ready for delivery':
+        return 'bg-orange-100 text-orange-700';
+  
+      case 'printed':
+        return 'bg-teal-100 text-teal-700'; // mint green
+  
+      case 'delivered':
+        return 'bg-emerald-200 text-emerald-800'; // darker emerald
+  
       case 'pending':
-        return 'bg-yellow-100 text-yellow-800';
+        return 'bg-amber-100 text-amber-700';
+  
       case 'failed':
-        return 'bg-red-100 text-red-800';
+        return 'bg-rose-100 text-rose-700';
+  
+      case 'cancelled':
+        return 'bg-slate-200 text-slate-700';
+  
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-slate-200 text-slate-700';
     }
-  };
+  };  
 
   const getPaymentStatusColor = (status: string) => {
     switch (status.toLowerCase()) {

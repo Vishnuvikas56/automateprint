@@ -1,419 +1,367 @@
-from itertools import combinations
-import json
-def order_combinations(order_type_supported: list, printers_data: dict):
-    result = {}
-    n = len(order_type_supported)
-    for r in range(1, n + 1):
-        for combo in combinations(order_type_supported, r):
-            key = ",".join(combo)
-            ranked_printers = []
-            for printer, supported in printers_data.items():
-                if all(c in supported for c in combo):
-                    extras = len(supported) - len(combo)
-                    priority = (
-                        extras,
-                    )
-                    ranked_printers.append((priority, printer))
-            ranked_printers.sort(key=lambda x: x[0])
-            result[key] = [printer for _, printer in ranked_printers]
-    return result
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, List
+import asyncio
+import win32print
+import win32api
+import tempfile
+import os
+from datetime import datetime
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from contextlib import contextmanager
+import logging
 
-# order_type_supported = ["color", "bw", "draft"]
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# printers_data = {
-#     "printer1": ["color", "bw"],
-#     "printer2": ["bw", "draft"],
-#     "printer3": ["color", "draft"],
-#     "printer4": ["color", "bw", "draft"]
-# }
+app = FastAPI(title="Print Supervisor Agent")
 
-# print(json.dumps(order_combinations(order_type_supported, printers_data), indent=4))
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def prioritized_job_queue(default_priorities:dict, current_order:dict, printers_data, existing_queue):
-    priorities = default_priorities[",".append(list(current_order.keys()))]
-    printer_details = {
-        "assigned_printer" : "",
-        "message" : {
-            "severity" : "",
-            "info" : ""
-        }
-    }
-    message = {}
-    pcount_upd = 0
-    for priority in priorities:
-        pcount_upd += printers_data[priority]["paper_count"]
-        ok = True
-        for otype, req in current_order.items():
-            if pcount_upd < req["paper_count"]:
-                ok = False
-                break
-        if ok:
-            assigned_printer = priority
-            break
-    if not assigned_printer:
-        return {
-                    "assigned_printer" : priorities[0], 
-                    "message" : {
-                        "severity" : "critical",
-                        "info" : "PAPER REFILL NEEDED"
-                    }
-                }
-    return {}
-
-
-# printer_scheduler_complete.py
-# Complete scheduler that:
-# - Accepts an "order" as a dict with full requirements (paper_count per order type)
-# - Splits order into optimal suborders if no single printer can do all
-# - Scores printers with weighted factors (paper%, ink%, speed, queue, extras)
-# - Returns a flat list of assigned printers in execution order (each suborder -> one printer)
-#
-# Usage:
-#  - Provide `printers_data` (dict of printers with supported, paper_count, ink, speed, queue)
-#  - Provide `order` (dict keyed by order type, each value {"paper_count": {ptype: count}})
-#  - Call schedule_order(order, printers_data)
-#
-# Example provided at bottom.
-
-from itertools import combinations
-import copy
-
-# ---------------------------
-# Default scoring weights
-# ---------------------------
-DEFAULT_WEIGHTS = {
-    "paper": 0.35,
-    "ink": 0.30,
-    "speed": 0.15,
-    "queue": 0.10,
-    "extras": 0.10
+# Database configuration
+DB_CONFIG = {
+    "host": "localhost",
+    "database": "printdb",
+    "user": "postgres",
+    "password": "your_password",
+    "port": 5432
 }
 
-# ---------------------------
-# Helpers
-# ---------------------------
-def _percent_score(pct):
-    """Clamp 0..100 and normalize to 0..1"""
-    p = max(0.0, min(100.0, pct))
-    return p / 100.0
+# Global state
+is_monitoring = False
+monitor_task = None
 
-def _queue_score(queue):
-    """Convert queue length (list or int) to score in (0,1], higher is better"""
-    qlen = 0
-    if queue is None:
-        qlen = 0
-    elif isinstance(queue, int):
-        qlen = queue
-    elif isinstance(queue, (list, tuple)):
-        qlen = len(queue)
-    else:
-        qlen = int(queue)
-    return 1.0 / (1.0 + qlen)
+# Models
+class PrintJob(BaseModel):
+    id: int
+    printer_id: str
+    file_path: str
+    status: str
+    created_at: datetime
+    completed_at: Optional[datetime] = None
 
-# ---------------------------
-# PART 1: Supported combinations discovery & suborder splitting
-# ---------------------------
-def _valid_supported_combos(order_types, printers_data):
-    """
-    Return a list of sets, each set is a combo of order types supported by at least one printer.
-    Larger combos first (useful for greedy covering).
-    """
-    order_types = list(order_types)
-    combos = []
-    for r in range(len(order_types), 0, -1):
-        for combo in combinations(order_types, r):
-            cset = set(combo)
-            # check printers
-            supported = False
-            for pname, pinfo in printers_data.items():
-                if not isinstance(pinfo, dict) or "supported" not in pinfo:
-                    continue
-                if cset.issubset(set(pinfo["supported"])):
-                    supported = True
-                    break
-            if supported:
-                combos.append(cset)
-    # remove duplicates (same set) while preserving order
-    uniq = []
-    seen = set()
-    for s in combos:
-        key = tuple(sorted(s))
-        if key not in seen:
-            uniq.append(s)
-            seen.add(key)
-    return uniq
+class PrinterInfo(BaseModel):
+    name: str
+    status: str
+    jobs: int
 
-def generate_suborders_from_order(order, printers_data):
-    """
-    Input:
-        order: dict mapping order_type -> {"paper_count": {ptype: count}}
-    Returns:
-        list of suborders (each suborder is a list of order_type strings)
-    Algorithm:
-        - Generate all supported combos (by printers)
-        - Greedy cover: pick combo that covers the largest number of remaining order types
-    Note: This is a greedy algorithm but works well for small order_type counts (typical use).
-    """
-    order_types = list(order.keys())
-    supported_combos = _valid_supported_combos(order_types, printers_data)
-    remaining = set(order_types)
-    result = []
+class SupervisorStatus(BaseModel):
+    is_monitoring: bool
+    available_printers: List[str]
+    pending_jobs: int
 
-    while remaining:
-        best = None
-        for combo in supported_combos:
-            overlap = len(combo & remaining)
-            if overlap == 0:
-                continue
-            if best is None or overlap > len(best & remaining):
-                best = combo
-        if best is None:
-            # No printer supports any of the remaining types => impossible to fulfill
-            raise Exception(f"No printer supports remaining order types: {remaining}")
-        result.append(list(best))
-        remaining -= best
+# Database connection manager
+@contextmanager
+def get_db_connection():
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        yield conn
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Database error: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
 
-    return result
+# Printer functions
+def get_available_printers():
+    """Get list of all available printers in the system"""
+    try:
+        printers = []
+        printer_enum = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)
+        for printer in printer_enum:
+            printers.append(printer[2])  # printer[2] is the printer name
+        return printers
+    except Exception as e:
+        logger.error(f"Error getting printers: {e}")
+        return []
 
-# ---------------------------
-# PART 2: Scoring printers for a single suborder (uses full order requirements)
-# ---------------------------
-def score_printer_for_suborder(printer_info, suborder_req, weights):
-    """
-    printer_info: dict for a printer (supported, paper_count, ink, speed, queue)
-    suborder_req: dict mapping order_type -> {"paper_count": {ptype: count}}
-                 (this is a subset of the full order, only for the suborder's types)
-    weights: scoring weights dict
-    Returns:
-        score (float 0..1). Returns 0 if hard-failed (insufficient paper or empty required ink channel).
-    """
-    # PAPER: compute remaining percentage (after allocating required papers)
-    paper_remaining_pcts = []
-    for otype, req in suborder_req.items():
-        required_papers = req.get("paper_count", {})
-        for ptype, need in required_papers.items():
-            available = printer_info.get("paper_count", {}).get(ptype, 0)
-            if available < need:
-                # hard fail: cannot fulfill required paper
-                return 0.0
-            # remaining percent after consuming 'need'
-            remaining_pct = (available - need) / available * 100.0 if available > 0 else 0.0
-            paper_remaining_pcts.append(remaining_pct)
-    paper_min_pct = min(paper_remaining_pcts) if paper_remaining_pcts else 100.0
-    paper_score = _percent_score(paper_min_pct)
-
-    # INK: evaluate required channels
-    ink_info = printer_info.get("ink", {})
-    ink_pcts = []
-    for otype in suborder_req.keys():
-        if otype == "bw":
-            bl = ink_info.get("black", 0.0)
-            if bl <= 0:
-                return 0.0
-            ink_pcts.append(bl)
-        if otype == "color":
-            c = ink_info.get("C", 0.0)
-            m = ink_info.get("M", 0.0)
-            y = ink_info.get("Y", 0.0)
-            if c <= 0 or m <= 0 or y <= 0:
-                return 0.0
-            ink_pcts.append(min(c, m, y))
-        # other order types typically don't require ink channels beyond bw/color;
-        # if you have specific inks for e.g. photo black, extend here.
-    ink_min_pct = min(ink_pcts) if ink_pcts else 100.0
-    ink_score = _percent_score(ink_min_pct)
-
-    # SPEED: normalize to 0..1 using cap 100 ppm. None -> neutral 0.5
-    speed = printer_info.get("speed", None)
-    if speed is None:
-        speed_score = 0.5
-    else:
-        speed_score = _percent_score(min(float(speed), 100.0))
-
-    # QUEUE: fewer is better
-    queue = printer_info.get("queue", [])
-    queue_score = _queue_score(queue)
-
-    # EXTRAS: penalty for extra supported types beyond required
-    supported_set = set(printer_info.get("supported", []))
-    required_set = set(suborder_req.keys())
-    extras_count = len(supported_set - required_set)
-    extras_penalty = 1.0 - min(extras_count, 10) / 10.0  # 1.0 best, 0.0 worst
-
-    # Weighted sum
-    w_p = weights.get("paper", DEFAULT_WEIGHTS["paper"])
-    w_i = weights.get("ink", DEFAULT_WEIGHTS["ink"])
-    w_s = weights.get("speed", DEFAULT_WEIGHTS["speed"])
-    w_q = weights.get("queue", DEFAULT_WEIGHTS["queue"])
-    w_e = weights.get("extras", DEFAULT_WEIGHTS["extras"])
-
-    score = (
-        w_p * paper_score +
-        w_i * ink_score +
-        w_s * speed_score +
-        w_q * queue_score +
-        w_e * extras_penalty
-    )
-
-    # score in 0..1 range
-    return float(score)
-
-# ---------------------------
-# PART 3: Assign best printer for one suborder
-# ---------------------------
-def assign_printer_for_suborder(suborder_types, order, printers_data, weights=DEFAULT_WEIGHTS, default_priorities=None):
-    """
-    suborder_types: list of order type strings (e.g. ["bw","color"])
-    order: the full order dict; we will extract requirements for the suborder types
-    printers_data: dict of printers
-    default_priorities: optional list ordering (for tie-breaker). If None, printer alphabetical order used.
-    Returns: printer name string (best match) or raises Exception if none
-    """
-    # Build suborder_req from order for only these types
-    suborder_req = {}
-    for t in suborder_types:
-        if t not in order:
-            raise Exception(f"Order missing requirements for type '{t}'")
-        suborder_req[t] = order[t]
-
-    candidates = []
-    for pname, pinfo in printers_data.items():
-        # skip non-printer meta entries (e.g., "requirements" or others)
-        if not isinstance(pinfo, dict) or "supported" not in pinfo:
-            continue
-        # must support all types in suborder
-        if not set(suborder_types).issubset(set(pinfo.get("supported", []))):
-            continue
-        # compute score (score=0 means cannot fulfill due to hard fail)
-        s = score_printer_for_suborder(pinfo, suborder_req, weights)
-        if s > 0.0:
-            candidates.append((s, pname))
-
-    if not candidates:
-        raise Exception(f"No printer can handle suborder {suborder_types}")
-
-    # sort by score desc, tie-break by default_priorities order if provided, else by name
-    if default_priorities:
-        # default_priorities is expected as a list of names in priority order
-        candidates.sort(key=lambda x: (-x[0], default_priorities.index(x[1]) if x[1] in default_priorities else 9999))
-    else:
-        candidates.sort(key=lambda x: (-x[0], x[1]))
-
-    best_printer = candidates[0][1]
-    return best_printer
-
-# ---------------------------
-# PART 4: Main scheduler
-# ---------------------------
-def schedule_order(order, printers_data, weights=DEFAULT_WEIGHTS, default_priorities_map=None):
-    # Step 1 — split into suborders
-    suborders = generate_suborders_from_order(order, printers_data)
-
-    assignments = []
-
-    # Step 2 — assign printer for each suborder
-    for s in suborders:
-        combo_key = ",".join(s)
-        default_priorities = None
-        if default_priorities_map:
-            default_priorities = default_priorities_map.get(combo_key)
-
-        printer = assign_printer_for_suborder(
-            s,
-            order,
-            printers_data,
-            weights,
-            default_priorities
-        )
-        assignments.append(printer)
-
-    return assignments
-
-def order_combinations(order_type_supported: list, printers_data: dict):
-    result = {}
-    n = len(order_type_supported)
-    for r in range(1, n + 1):
-        for combo in combinations(order_type_supported, r):
-            key = ",".join(combo)
-            ranked_printers = []
-            for printer, pdata in printers_data.items():
-                supported = pdata["supported"]
-                if all(c in supported for c in combo):
-                    extras = len(supported) - len(combo)
-                    priority = (
-                        extras,
-                    )
-                    ranked_printers.append((priority, printer))
-            ranked_printers.sort(key=lambda x: x[0])
-            result[key] = [printer for _, printer in ranked_printers]
-    return result
-
-# ---------------------------
-# Example dataset and test call
-# ---------------------------
-if __name__ == "__main__":
-    # Six printers (one with full capability) with realistic random-ish params
-    printers_data = {
-        "P1": {
-            "supported": ["bw", "color"],
-            "paper_count": {"A4": 180, "A3": 50},
-            "ink": {"black": 70, "C": 60, "M": 55, "Y": 50},
-            "speed": 35,
-            "queue": ["job1", "job2"]
-        },
-        "P2": {
-            "supported": ["bw", "thick"],
-            "paper_count": {"A4": 90, "Thick": 40},
-            "ink": {"black": 80},
-            "speed": 25,
-            "queue": []
-        },
-        "P3": {
-            "supported": ["color", "glossy"],
-            "paper_count": {"Glossy": 30, "A4": 70},
-            "ink": {"black": 50, "C": 45, "M": 46, "Y": 42},
-            "speed": 20,
-            "queue": ["jobA"]
-        },
-        "P4": {
-            "supported": ["postersize"],
-            "paper_count": {"Poster": 15},
-            "ink": {"black": 40, "C": 30, "M": 32, "Y": 28},
-            "speed": 15,
-            "queue": ["p1", "p2", "p3"]
-        },
-        "P5": {
-            "supported": ["bw", "color", "glossy"],
-            "paper_count": {"A4": 200, "Glossy": 60},
-            "ink": {"black": 85, "C": 80, "M": 79, "Y": 78},
-            "speed": 50,
-            "queue": []
-        },
-        "P6": {
-            "supported": ["bw", "color", "thick", "glossy", "postersize"],  # full capability
-            "paper_count": {"A4": 300, "Thick": 80, "Glossy": 100, "Poster": 40},
-            "ink": {"black": 95, "C": 92, "M": 93, "Y": 94},
-            "speed": 65,
-            "queue": []
+def get_printer_info(printer_name: str):
+    """Get detailed information about a specific printer"""
+    try:
+        handle = win32print.OpenPrinter(printer_name)
+        printer_info = win32print.GetPrinter(handle, 2)
+        win32print.ClosePrinter(handle)
+        
+        return {
+            "name": printer_name,
+            "status": "Ready" if printer_info["Status"] == 0 else "Busy",
+            "jobs": printer_info["cJobs"]
         }
+    except Exception as e:
+        logger.error(f"Error getting printer info for {printer_name}: {e}")
+        return None
+
+def send_to_printer(printer_name: str, file_path: str):
+    """Send a file to the specified printer"""
+    try:
+        # Check if file exists
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        # Print the file using Windows API
+        win32api.ShellExecute(
+            0,
+            "print",
+            file_path,
+            f'/d:"{printer_name}"',
+            ".",
+            0
+        )
+        logger.info(f"Successfully sent {file_path} to {printer_name}")
+        return True
+    except Exception as e:
+        logger.error(f"Error printing to {printer_name}: {e}")
+        return False
+
+# Database operations
+def get_pending_jobs():
+    """Get all pending print jobs from the database"""
+    with get_db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT id, printer_id, file_path, status, created_at, completed_at
+                FROM jobqueue
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+            """)
+            return cursor.fetchall()
+
+def update_job_status(job_id: int, status: str, error_message: Optional[str] = None):
+    """Update the status of a print job"""
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            if status == 'completed':
+                cursor.execute("""
+                    UPDATE jobqueue
+                    SET status = %s, completed_at = NOW()
+                    WHERE id = %s
+                """, (status, job_id))
+            elif status == 'failed':
+                cursor.execute("""
+                    UPDATE jobqueue
+                    SET status = %s, error_message = %s
+                    WHERE id = %s
+                """, (status, error_message, job_id))
+            else:
+                cursor.execute("""
+                    UPDATE jobqueue
+                    SET status = %s
+                    WHERE id = %s
+                """, (status, job_id))
+
+def update_job_processing(job_id: int):
+    """Mark job as processing"""
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                UPDATE jobqueue
+                SET status = 'processing'
+                WHERE id = %s
+            """, (job_id,))
+
+# Print job processor
+async def process_print_jobs():
+    """Main loop to process print jobs"""
+    logger.info("Starting print job processor")
+    
+    while is_monitoring:
+        try:
+            # Get available printers
+            available_printers = get_available_printers()
+            logger.info(f"Available printers: {available_printers}")
+            
+            # Get pending jobs
+            pending_jobs = get_pending_jobs()
+            
+            if pending_jobs:
+                logger.info(f"Found {len(pending_jobs)} pending jobs")
+            
+            for job in pending_jobs:
+                job_id = job['id']
+                printer_id = job['printer_id']
+                file_path = job['file_path']
+                
+                # Check if printer ID matches any available printer
+                if printer_id not in available_printers:
+                    logger.warning(f"Job {job_id}: Printer '{printer_id}' not found in system. Skipping.")
+                    continue
+                
+                # Mark job as processing
+                logger.info(f"Processing job {job_id} on printer {printer_id}")
+                update_job_processing(job_id)
+                
+                # Send to printer
+                success = send_to_printer(printer_id, file_path)
+                
+                if success:
+                    update_job_status(job_id, 'completed')
+                    logger.info(f"Job {job_id} completed successfully")
+                else:
+                    update_job_status(job_id, 'failed', 'Failed to send to printer')
+                    logger.error(f"Job {job_id} failed")
+                
+                # Small delay between jobs
+                await asyncio.sleep(2)
+            
+            # Wait before next iteration
+            await asyncio.sleep(5)
+            
+        except Exception as e:
+            logger.error(f"Error in process_print_jobs: {e}")
+            await asyncio.sleep(10)
+
+# API Endpoints
+@app.get("/")
+def read_root():
+    return {
+        "service": "Print Supervisor Agent",
+        "status": "running",
+        "monitoring": is_monitoring
     }
 
-    # Order must be a dict: each order type maps to its paper_count requirements
-    # (you can change counts to simulate bigger/smaller jobs)
-    order = {
-        "bw": {"paper_count": {"A4": 2}},          # 2 A4 pages bw
-        "color": {"paper_count": {"A4": 1}},       # 1 A4 color
-        "glossy": {"paper_count": {"Glossy": 2}},  # 2 glossy sheets
-        "postersize": {"paper_count": {"Poster": 1}}  # 1 poster sheet
-    }
+@app.get("/printers", response_model=List[str])
+def list_printers():
+    """Get list of all available printers"""
+    printers = get_available_printers()
+    return printers
 
-    # Optional: default priority map for tie-breaking (combo_key -> list)
-    default_priorities_map = order_combinations(["bw", "color", "thick", "glossy", "postersize"], printers_data)
+@app.get("/printers/{printer_name}")
+def get_printer_details(printer_name: str):
+    """Get detailed information about a specific printer"""
+    info = get_printer_info(printer_name)
+    if info is None:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    return info
 
-    # Run scheduler
-    assigned = schedule_order(order, printers_data, weights=DEFAULT_WEIGHTS, default_priorities_map=default_priorities_map)
-    print("Assigned printers (sequence):", assigned)
+@app.get("/jobs/pending")
+def list_pending_jobs():
+    """Get all pending print jobs"""
+    try:
+        jobs = get_pending_jobs()
+        return {"count": len(jobs), "jobs": jobs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    # Try a single-suborder order (should likely pick P6 or P5)
-    order2 = {"bw": {"paper_count": {"A4": 1}}, "color": {"paper_count": {"A4": 1}}}
-    print("Assigned for simple bw+color:", schedule_order(order2, printers_data))
+@app.get("/status", response_model=SupervisorStatus)
+def get_supervisor_status():
+    """Get the current status of the supervisor"""
+    try:
+        available_printers = get_available_printers()
+        pending_jobs = get_pending_jobs()
+        
+        return SupervisorStatus(
+            is_monitoring=is_monitoring,
+            available_printers=available_printers,
+            pending_jobs=len(pending_jobs)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/monitoring/start")
+async def start_monitoring(background_tasks: BackgroundTasks):
+    """Start the print job monitoring service"""
+    global is_monitoring, monitor_task
+    
+    if is_monitoring:
+        return {"message": "Monitoring is already running"}
+    
+    is_monitoring = True
+    monitor_task = asyncio.create_task(process_print_jobs())
+    
+    logger.info("Print monitoring started")
+    return {"message": "Print monitoring started successfully"}
+
+@app.post("/monitoring/stop")
+async def stop_monitoring():
+    """Stop the print job monitoring service"""
+    global is_monitoring, monitor_task
+    
+    if not is_monitoring:
+        return {"message": "Monitoring is not running"}
+    
+    is_monitoring = False
+    
+    if monitor_task:
+        monitor_task.cancel()
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
+    
+    logger.info("Print monitoring stopped")
+    return {"message": "Print monitoring stopped successfully"}
+
+@app.post("/jobs/{job_id}/retry")
+def retry_job(job_id: int):
+    """Manually retry a failed job"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT * FROM jobqueue WHERE id = %s
+                """, (job_id,))
+                job = cursor.fetchone()
+                
+                if not job:
+                    raise HTTPException(status_code=404, detail="Job not found")
+                
+                if job['status'] not in ['failed', 'completed']:
+                    raise HTTPException(status_code=400, detail="Job is not in a retryable state")
+                
+                cursor.execute("""
+                    UPDATE jobqueue
+                    SET status = 'pending', error_message = NULL
+                    WHERE id = %s
+                """, (job_id,))
+        
+        return {"message": f"Job {job_id} reset to pending"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.on_event("startup")
+async def startup_event():
+    """Start monitoring on server startup"""
+    global is_monitoring, monitor_task
+    
+    logger.info("Print Supervisor Agent starting up")
+    
+    # Automatically start monitoring
+    is_monitoring = True
+    monitor_task = asyncio.create_task(process_print_jobs())
+    logger.info("Auto-started print monitoring")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean shutdown"""
+    global is_monitoring, monitor_task
+    
+    logger.info("Print Supervisor Agent shutting down")
+    
+    is_monitoring = False
+    if monitor_task:
+        monitor_task.cancel()
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)

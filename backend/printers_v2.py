@@ -70,11 +70,12 @@ class PrinterStatus(str, Enum):
     PAPER_JAM = "paper_jam"
     OUT_OF_PAPER = "out_of_paper"
     LOW_INK = "low_ink"
+    ONLINE = "online"
 
 class AlertSeverity(str, Enum):
-    INFO = "info"
-    WARNING = "warning"
-    CRITICAL = "critical"
+    INFO = "Info"
+    WARNING = "Warning"
+    CRITICAL = "Critical"
 
 class PaperType(str, Enum):
     A4 = "A4"
@@ -539,7 +540,7 @@ def consume_resources(printer_id: str, job: Dict):
 
 async def send_alert(printer_id: str, alert_type: str, severity: AlertSeverity, 
                     message: str, recommended_action: str):
-    """Send alert for printer issues"""
+    """Send alert and save to database"""
     printer = PRINTERS[printer_id]
     
     alert = AlertPayload(
@@ -562,6 +563,26 @@ async def send_alert(printer_id: str, alert_type: str, severity: AlertSeverity,
     
     ALERTS.append(alert.dict())
     logger.warning(f"🚨 ALERT [{severity.value.upper()}] {printer_id}: {message}")
+    
+    # Save to database via backend API
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                "http://localhost:8000/api/alerts/create",
+                json={
+                    "printer_id": printer_id,
+                    "alert_type": alert_type.lower(),
+                    "alert_message": message,
+                    "severity": severity.value,
+                    "metadata": {
+                        "printer_name": printer["name"],
+                        "consumable_levels": alert.consumable_levels,
+                        "recommended_action": recommended_action
+                    }
+                }
+            )
+    except Exception as e:
+        logger.error(f"Failed to save alert to database: {e}")
     
     return alert
 
@@ -652,11 +673,11 @@ async def send_webhook(webhook_url: str, job_id: str, status: str, progress: int
     """Send webhook update to backend"""
     if not webhook_url:
         return
-    
+    order_id = job_id.rsplit('-', 1)[0]
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             payload = {
-                "job_id": job_id,
+                "job_id": order_id,
                 "status": status,
                 "progress_percent": progress,
                 "printer_id": printer_id,
@@ -1337,6 +1358,165 @@ def health_check():
         "printers_online": len([p for p in PRINTERS.values() 
                                if p["status"] not in [PrinterStatus.OFFLINE]]),
         "api_version": "3.0"
+    }
+
+@app.post("/printers/{printer_id}/pause")
+async def pause_printer(printer_id: str):
+    """Pause printer - prevents new jobs but allows current job to finish"""
+    if printer_id not in PRINTERS:
+        raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
+    
+    printer = PRINTERS[printer_id]
+    
+    if printer["status"] == PrinterStatus.BUSY:
+        # Allow current job to finish but don't start new ones
+        printer["status"] = PrinterStatus.MAINTENANCE
+        logger.info(f"⏸️ Printer {printer_id} paused (current job will finish)")
+        return {
+            "message": f"Printer {printer_id} paused",
+            "current_job": printer["current_job"],
+            "queue_paused": True
+        }
+    else:
+        printer["status"] = PrinterStatus.MAINTENANCE
+        logger.info(f"⏸️ Printer {printer_id} paused")
+        return {
+            "message": f"Printer {printer_id} paused",
+            "queue_paused": True
+        }
+
+@app.post("/printers/{printer_id}/resume")
+async def resume_printer(printer_id: str):
+    """Resume paused printer"""
+    if printer_id not in PRINTERS:
+        raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
+    
+    printer = PRINTERS[printer_id]
+    
+    if printer["status"] == PrinterStatus.MAINTENANCE:
+        printer["status"] = PrinterStatus.IDLE
+        logger.info(f"▶️ Printer {printer_id} resumed")
+        
+        # Start next job if queue has items
+        if printer["queue"]:
+            next_job_id = printer["queue"].pop(0)
+            asyncio.create_task(simulate_printing(printer_id, next_job_id))
+        
+        return {
+            "message": f"Printer {printer_id} resumed",
+            "status": printer["status"].value
+        }
+    else:
+        return {
+            "message": f"Printer {printer_id} is not paused",
+            "status": printer["status"].value
+        }
+
+@app.post("/printers/{printer_id}/cancel-job")
+async def cancel_current_job(printer_id: str):
+    """Cancel currently printing job with safe acknowledgement"""
+
+    if printer_id not in PRINTERS:
+        # Only actual error we keep
+        raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
+    
+    printer = PRINTERS[printer_id]
+
+    # CASE 1 → No active job
+    if not printer["current_job"]:
+        return {
+            "message": "No active job to cancel",
+            "printer_id": printer_id,
+            "cancelled_job_id": None
+        }
+    
+    # CASE 2 → There is an active job
+    job_id = printer["current_job"]
+    job = JOBS.get(job_id)
+
+    if job:
+        job["status"] = JobStatus.CANCELLED
+        job["error_message"] = "Job cancelled by supervisor"
+        job["completed_at"] = datetime.now()
+
+    printer["current_job"] = None
+    printer["status"] = PrinterStatus.IDLE
+
+    # Send webhook notification only if job existed
+    await send_webhook(
+        job.get("webhook_url") if job else None,
+        job_id,
+        "cancelled",
+        job.get("progress_percent", 0) if job else 0,
+        printer_id,
+        "Job cancelled by supervisor"
+    )
+
+    logger.warning(f"🛑 Job {job_id} cancelled on printer {printer_id}")
+
+    # Start next job if queued
+    if printer["queue"]:
+        next_job_id = printer["queue"].pop(0)
+        asyncio.create_task(simulate_printing(printer_id, next_job_id))
+
+    return {
+        "message": f"Job {job_id} cancelled",
+        "printer_id": printer_id,
+        "cancelled_job_id": job_id
+    }
+
+
+@app.post("/printers/{printer_id}/test-print")
+async def test_print(printer_id: str, background_tasks: BackgroundTasks):
+    """Run a test print job"""
+    if printer_id not in PRINTERS:
+        raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
+    
+    printer = PRINTERS[printer_id]
+    
+    if printer["status"] not in [PrinterStatus.IDLE, PrinterStatus.ONLINE]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Printer is {printer['status'].value}, cannot run test print"
+        )
+    
+    # Create test job
+    test_job_id = f"TEST-{uuid.uuid4().hex[:8].upper()}"
+    
+    test_job = {
+        "job_id": test_job_id,
+        "printer_id": printer_id,
+        "status": JobStatus.QUEUED,
+        "print_type": PrintType.BW,
+        "paper_type": "A4",
+        "pages": 1,
+        "copies": 1,
+        "total_pages": 1,
+        "pages_printed": 0,
+        "priority": 10,  # High priority
+        "file_url": None,
+        "webhook_url": None,
+        "duplex": False,
+        "collate": True,
+        "started_at": None,
+        "completed_at": None,
+        "estimated_completion": None,
+        "progress_percent": 0,
+        "error_message": None,
+        "queued_at": datetime.now()
+    }
+    
+    JOBS[test_job_id] = test_job
+    
+    logger.info(f"🧪 Test print initiated for {printer_id}: {test_job_id}")
+    
+    # Start test print immediately
+    background_tasks.add_task(simulate_printing, printer_id, test_job_id)
+    
+    return {
+        "message": "Test print started",
+        "test_job_id": test_job_id,
+        "printer_id": printer_id
     }
 
 if __name__ == "__main__":
